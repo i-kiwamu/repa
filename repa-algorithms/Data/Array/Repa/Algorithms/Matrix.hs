@@ -23,6 +23,9 @@ module Data.Array.Repa.Algorithms.Matrix
           -- * Matrix-Vector Multiplication.
         , mvmultP,     mvmultS
 
+          -- * outer product between Vector
+        , outerP,        outerS
+
           -- * Transposition.
         , transpose2P, transpose2S
 
@@ -135,6 +138,29 @@ mvmultS arr vrr
 {-# NOINLINE mvmultS #-}
 
 
+outerP :: Monad m
+          => Array U DIM1 Double
+          -> Array U DIM1 Double
+          -> m (Array U DIM2 Double)
+outerP va vb
+ = [va, vb] `deepSeqArrays` (computeP $ ma *^ mb)
+ where na = size $ extent va
+       nb = size $ extent vb
+       ma = extend (Z :. All :. nb) va
+       mb = extend (Z :. na :. All) vb
+{-# NOINLINE outerP #-}
+
+
+outerS :: Array U DIM1 Double
+          -> Array U DIM1 Double
+          -> Array U DIM2 Double
+outerS va vb
+ = [va, vb] `deepSeqArrays` (computeS $ ma *^ mb)
+ where na = size $ extent va
+       nb = size $ extent vb
+       ma = extend (Z :. All :. nb) va
+       mb = extend (Z :. na :. All) vb
+{-# NOINLINE outerS #-}
 
 
 -- Transpose ------------------------------------------------------------------
