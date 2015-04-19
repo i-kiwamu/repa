@@ -113,10 +113,11 @@ mvmultP :: Monad m
            -> m (Array U DIM1 Double)
 mvmultP arr vrr
  = arr `deepSeqArray` vrr `deepSeqArray` (computeP $ R.map doti rs)
- where (Z :. nr :. _) = R.extent arr
-       rs = R.fromListUnboxed (Z :. nr) [0..(nr-1)]
+ where nr = row $ extent arr
+       rs = fromListUnboxed (Z :. nr) [0..(nr-1)]
        doti :: Int -> Double
        doti r = dotS (slice arr (Any :. r :. All)) vrr
+       {-# NOINLINE doti #-}
 {-# NOINLINE mvmultP #-}
 
 
@@ -126,10 +127,11 @@ mvmultS :: Array U DIM2 Double
 mvmultS arr vrr
  = arr `deepSeqArray` vrr `deepSeqArray` (runST $
    return $ computeS $ R.map doti rs)
- where (Z :. nr :. _) = R.extent arr
-       rs = R.fromListUnboxed (Z :. nr) [0..(nr-1)] 
+ where nr = row $ extent arr
+       rs = fromListUnboxed (Z :. nr) [0..(nr-1)] 
        doti :: Int -> Double
        doti r = dotS (slice arr (Any :. r :. All)) vrr
+       {-# NOINLINE doti #-}
 {-# NOINLINE mvmultS #-}
 
 
