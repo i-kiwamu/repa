@@ -44,6 +44,8 @@ import Control.Monad
 import Control.Monad.ST.Strict
 import Data.Vector.Unboxed.Base (Unbox)
 import Data.Ix (range)
+import Data.List                        as L
+import Data.Ord (comparing)
 
 
 -- Projections ----------------------------------------------------------------
@@ -228,17 +230,18 @@ det2P arr = undefined
 
 
 -- LU decomposition --------------------------------------------------------------
--- | LU decomposition (L(i,i) = 1) in parallel
+-- | LU decomposition by Crout algorithms (L(i,i) = 1) in parallel
 luP :: Monad m
        => Array U DIM2 Double 
        -> m (Array U DIM2 Double)
 luP arr = arr `deepSeqArray` computeP arr'
   where arr' = R.fromFunction e (\(Z :. i :. j) -> f i j)
         e = R.extent arr
-        n = row e - 1
         f i j = if i > j
-                then (aij - sum [a'i_ k * a'_j k | k <- [1..(j-1)]]) / a'jj
-                else  aij - sum [a'i_ k * a'_j k | k <- [1..(i-1)]]
+                -- lower triangles
+                then (aij - sum [a'i_ k * a'_j k | k <- [0..(j-1)]]) / a'jj
+                -- upper triangles
+                else  aij - sum [a'i_ k * a'_j k | k <- [0..(i-1)]]
           where
             aij    = arr  R.! (Z :. i :. j)
             a'i_ k = arr' R.! (Z :. i :. k)
@@ -247,16 +250,17 @@ luP arr = arr `deepSeqArray` computeP arr'
 {-# NOINLINE luP #-}
 
 
--- | LU decomposition (L(i,i) = 1) sequentially
+-- | LU decomposition by Crout algorithms (L(i,i) = 1) sequentially
 luS :: Array U DIM2 Double 
        -> Array U DIM2 Double
 luS arr = arr `deepSeqArray` computeS arr'
   where arr' = R.fromFunction e (\(Z :. i :. j) -> f i j)
         e = R.extent arr
-        n = row e - 1
         f i j = if i > j
-                then (aij - sum [a'i_ k * a'_j k | k <- [1..(j-1)]]) / a'jj
-                else  aij - sum [a'i_ k * a'_j k | k <- [1..(i-1)]]
+                -- lower triangles
+                then (aij - sum [a'i_ k * a'_j k | k <- [0..(j-1)]]) / a'jj
+                -- upper triangles
+                else  aij - sum [a'i_ k * a'_j k | k <- [0..(i-1)]]
           where
             aij    = arr  R.! (Z :. i :. j)
             a'i_ k = arr' R.! (Z :. i :. k)
