@@ -27,10 +27,14 @@ module Data.Array.Repa.Algorithms.Matrix
         , outerP,        outerS
 
           -- * Transposition.
-        , transpose2P, transpose2S
+        , t2P, t2S
 
           -- * Trace.
-        , trace2P, trace2S)
+        , trace2P, trace2S
+
+          -- * Transposition.
+        , det2P, det2S)
+
 
 where
 import Data.Array.Repa                  as R
@@ -165,32 +169,28 @@ outerS va vb
 
 -- Transpose ------------------------------------------------------------------
 -- | Transpose a 2D matrix, in parallel.
-transpose2P
-        :: Monad m 
-        => Array U DIM2 Double 
-        -> m (Array U DIM2 Double)
+t2P :: Monad m 
+       => Array U DIM2 Double 
+       -> m (Array U DIM2 Double)
 
-transpose2P arr
- = arr `deepSeqArray`
-   do   computeUnboxedP 
-         $ unsafeBackpermute new_extent swap arr
+t2P arr
+ = arr `deepSeqArray` computeUnboxedP $
+   unsafeBackpermute new_extent swap arr
  where  swap (Z :. i :. j)      = Z :. j :. i
         new_extent              = swap (extent arr)
-{-# NOINLINE transpose2P #-}
+{-# NOINLINE t2P #-}
 
 
 -- | Transpose a 2D matrix, sequentially.
-transpose2S
-        :: Array U DIM2 Double 
-        -> Array U DIM2 Double
+t2S :: Array U DIM2 Double 
+       -> Array U DIM2 Double
 
-transpose2S arr
- = arr `deepSeqArray`
-   do   computeUnboxedS
-         $ unsafeBackpermute new_extent swap arr
+t2S arr
+ = arr `deepSeqArray` computeUnboxedS $
+   unsafeBackpermute new_extent swap arr
  where  swap (Z :. i :. j)      = Z :. j :. i
         new_extent              = swap (extent arr)
-{-# NOINLINE transpose2S #-}
+{-# NOINLINE t2S #-}
 
 
 -- Trace ------------------------------------------------------------------------
@@ -201,7 +201,6 @@ trace2P x
  where
     safeHead []     = error "repa-algorithms: trace2P empty list"
     safeHead (x':_) = x'
-
     y               = unsafeBackpermute (extent x) f x
     f (Z :. i :. j) = Z :. (i - j) `mod` nRows:. j
     Z :. nRows :. _nCols = extent x
@@ -214,7 +213,11 @@ trace2S x
  where
     safeHead []     = error "repa-algorithms: trace2S empty list"
     safeHead (x':_) = x'
-
     y               =  unsafeBackpermute (extent x) f x
     f (Z :. i :. j) = Z :. (i - j) `mod` nRows:. j
     Z :. nRows :. _nCols = extent x
+
+-- Determinant -------------------------------------------------------------------
+-- | Get the determinant of a (square) 2D matrix, in parallel.
+det2P :: Monad m => Array U DIM2 Double -> m Double
+det2P arr = undefined
