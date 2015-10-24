@@ -33,7 +33,7 @@ module Data.Array.Repa.Algorithms.Matrix
         , trace2P, trace2S
 
           -- * Transposition.
-        , det2P, det2S)
+        , det2P)
 
 
 where
@@ -43,6 +43,7 @@ import Data.Array.Repa.Unsafe           as R
 import Control.Monad
 import Control.Monad.ST.Strict
 import Data.Vector.Unboxed.Base (Unbox)
+import Data.Ix (range)
 
 
 -- Projections ----------------------------------------------------------------
@@ -67,7 +68,7 @@ mmultP  :: Monad m
 
 mmultP arr brr 
  = [arr, brr] `deepSeqArrays` 
-   do   trr      <- transpose2P brr
+   do   trr      <- t2P brr
         let (Z :. h1  :. _)  = extent arr
         let (Z :. _   :. w2) = extent brr
         computeP 
@@ -86,7 +87,7 @@ mmultS  :: Array U DIM2 Double
 
 mmultS arr brr
  = [arr, brr]  `deepSeqArrays` (runST $
-   do   trr     <- R.now $ transpose2S brr
+   do   trr     <- R.now $ t2S brr
         let (Z :. h1  :. _)  = extent arr
         let (Z :. _   :. w2) = extent brr
         return $ computeS 
@@ -204,6 +205,7 @@ trace2P x
     y               = unsafeBackpermute (extent x) f x
     f (Z :. i :. j) = Z :. (i - j) `mod` nRows:. j
     Z :. nRows :. _nCols = extent x
+{-# NOINLINE trace2P #-}
 
 
 -- | Get the trace of a (square) 2D matrix, sequentially.
@@ -216,8 +218,48 @@ trace2S x
     y               =  unsafeBackpermute (extent x) f x
     f (Z :. i :. j) = Z :. (i - j) `mod` nRows:. j
     Z :. nRows :. _nCols = extent x
+{-# NOINLINE trace2S #-}
+
 
 -- Determinant -------------------------------------------------------------------
 -- | Get the determinant of a (square) 2D matrix, in parallel.
 det2P :: Monad m => Array U DIM2 Double -> m Double
 det2P arr = undefined
+
+
+-- LU decomposition --------------------------------------------------------------
+-- | LU decomposition (L(i,i) = 1) in parallel
+luP :: Monad m
+       => Array U DIM2 Double 
+       -> m (Array U DIM2 Double)
+luP arr = arr `deepSeqArray` computeP arr'
+  where arr' = R.fromFunction e (\(Z :. i :. j) -> f i j)
+        e = R.extent arr
+        n = row e - 1
+        f i j = if i > j
+                then (aij - sum [a'i_ k * a'_j k | k <- [1..(j-1)]]) / a'jj
+                else  aij - sum [a'i_ k * a'_j k | k <- [1..(i-1)]]
+          where
+            aij    = arr  R.! (Z :. i :. j)
+            a'i_ k = arr' R.! (Z :. i :. k)
+            a'_j k = arr' R.! (Z :. k :. j)
+            a'jj   = arr' R.! (Z :. j :. j)
+{-# NOINLINE luP #-}
+
+
+-- | LU decomposition (L(i,i) = 1) sequentially
+luS :: Array U DIM2 Double 
+       -> Array U DIM2 Double
+luS arr = arr `deepSeqArray` computeS arr'
+  where arr' = R.fromFunction e (\(Z :. i :. j) -> f i j)
+        e = R.extent arr
+        n = row e - 1
+        f i j = if i > j
+                then (aij - sum [a'i_ k * a'_j k | k <- [1..(j-1)]]) / a'jj
+                else  aij - sum [a'i_ k * a'_j k | k <- [1..(i-1)]]
+          where
+            aij    = arr  R.! (Z :. i :. j)
+            a'i_ k = arr' R.! (Z :. i :. k)
+            a'_j k = arr' R.! (Z :. k :. j)
+            a'jj   = arr' R.! (Z :. j :. j)
+{-# NOINLINE luS #-}
