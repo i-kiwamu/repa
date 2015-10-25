@@ -1,48 +1,50 @@
 
 module Data.Repa.Vector.Unboxed
-        ( -- * Conversion
-          chainOfVector
-        , unchainToVector
-        , unchainToMVector
+        ( -- * Stream operators
+          -- ** Compacting
+          compact
+        , compactIn
 
-          -- * Generating
-        , ratchet
-
-          -- * Extracting
-        , extract
-
-          -- * Inserting
-        , insert
-
-          -- * Merging
-        , merge
-        , mergeMaybe
-
-          -- * Splitting
+          -- ** Dicing
         , findSegments
         , findSegmentsFrom
         , diceSep
 
-          -- * Compacting
-        , compact
-        , compactIn
+          -- ** Extracting
+        , extract
 
-          -- * Padding
+          -- ** Inserting
+        , insert
+
+          -- ** Merging
+        , merge
+        , mergeMaybe
+
+          -- ** Padding
         , padForward
 
-          -- * Scanning
-        , scanMaybe
+          -- ** Ratcheting
+        , ratchet
 
-          -- * Grouping
+          -- * Chain operators
+        , unchainToVector
+        , unchainToMVector
+
+          -- ** Folding
+        , folds, C.Folds(..)
+
+          -- ** Scanning
+        , scanMaybe
         , groupsBy
 
-          -- * Folding
-        , folds, C.Folds(..))
+          -- ** Conversion
+        , chainOfVector
+        )
 where
-import Data.Repa.Option
 import Data.Vector.Unboxed                              (Unbox, Vector)
 import Data.Vector.Unboxed.Mutable                      (MVector)
 import Data.Repa.Chain                                  (Chain)
+import Data.Repa.Scalar.Option
 import qualified Data.Repa.Vector.Generic               as G
 import qualified Data.Repa.Chain                        as C
 import qualified Data.Vector.Unboxed                    as U
@@ -257,7 +259,7 @@ diceSep = G.diceSep
 --
 compact
         :: (Unbox a, Unbox b)
-        => (s -> a -> (Maybe b, s))     -- ^ Worker function
+        => (s -> a -> (s, Maybe b))     -- ^ Worker function
         -> s                            -- ^ Starting state
         -> Vector a                     -- ^ Input vector
         -> Vector b
@@ -270,7 +272,7 @@ compact = G.compact
 --   initial state, and add the final state to the end of the output.
 compactIn
         :: Unbox a
-        => (a -> a -> (Maybe a, a))     -- ^ Worker function.
+        => (a -> a -> (a, Maybe a))     -- ^ Worker function.
         -> Vector a                     -- ^ Input elements.
         -> Vector a
 

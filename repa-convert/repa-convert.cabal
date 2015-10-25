@@ -1,5 +1,5 @@
 Name:           repa-convert
-Version:        4.1.0.1
+Version:        4.2.0.0
 License:        BSD3
 License-file:   LICENSE
 Author:         The Repa Development Team
@@ -10,8 +10,8 @@ Stability:      experimental
 Category:       Data Structures
 Homepage:       http://repa.ouroborus.net
 Bug-reports:    repa@ouroborus.net
-Description:    Packing and unpacking binary data.
-Synopsis:       Packing and unpacking binary data.
+Description:    Packing and unpacking flat tables.
+Synopsis:       Packing and unpacking flat tables.
 
 source-repository head
   type:     git
@@ -23,25 +23,41 @@ Library
         primitive         == 0.6.*,
         vector            == 0.10.*,
         bytestring        == 0.10.*,
-        double-conversion == 2.0.*
+        text              == 1.2.*,
+        double-conversion == 2.0.*,
+        repa-scalar       == 4.2.0.*
 
   exposed-modules:
-        Data.Repa.Product
         Data.Repa.Convert.Format
-        Data.Repa.Convert.Numeric
-        Data.Repa.Convert.Date32
-        Data.Repa.Bits.Date32
-
-        Data.Repa.Convert.Format.Base
-        Data.Repa.Convert.Format.Binary
-        Data.Repa.Convert.Format.Lists
-        Data.Repa.Convert.Format.Fields
-        Data.Repa.Convert.Format.Numeric
-        Data.Repa.Convert.Format.Date32
+        Data.Repa.Convert.Formats
+        Data.Repa.Convert
 
   other-modules:
+        Data.Repa.Convert.Internal.Format
+        Data.Repa.Convert.Internal.Packable
+        Data.Repa.Convert.Internal.Packer
+        Data.Repa.Convert.Internal.Unpacker        
 
+        Data.Repa.Convert.Format.Ascii
+        Data.Repa.Convert.Format.App
+        Data.Repa.Convert.Format.Binary
+        Data.Repa.Convert.Format.Bytes
+        Data.Repa.Convert.Format.Date32
+        Data.Repa.Convert.Format.Fields
+        Data.Repa.Convert.Format.Maybe
+        Data.Repa.Convert.Format.Numeric
+        Data.Repa.Convert.Format.Object
+        Data.Repa.Convert.Format.Sep
+        Data.Repa.Convert.Format.String
+        Data.Repa.Convert.Format.Text
+        Data.Repa.Convert.Format.Tup
+        Data.Repa.Convert.Format.Unit
 
+  include-dirs:
+        include
+
+  install-includes:
+        repa-convert.h
 
   ghc-options:
         -Wall -fno-warn-missing-signatures
@@ -49,19 +65,22 @@ Library
 
   extensions:
         CPP
-        ForeignFunctionInterface
-        NoMonomorphismRestriction
-        ExistentialQuantification
-        BangPatterns
+        GADTs
         MagicHash
+        DataKinds
+        RankNTypes
+        MultiWayIf
+        BangPatterns
+        TypeFamilies
+        PatternGuards
+        TypeOperators
         UnboxedTuples
         FlexibleContexts
         FlexibleInstances
-        PatternGuards
-        MultiWayIf
-        TypeFamilies
-        TypeOperators
+        StandaloneDeriving
         ScopedTypeVariables
         MultiParamTypeClasses
-
-
+        FunctionalDependencies
+        ForeignFunctionInterface
+        ExistentialQuantification
+        NoMonomorphismRestriction

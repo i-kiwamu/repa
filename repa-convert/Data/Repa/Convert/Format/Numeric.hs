@@ -1,13 +1,21 @@
 
 module Data.Repa.Convert.Format.Numeric
-        ( IntAsc    (..)
-        , DoubleAsc (..))
+        ( IntAsc                (..)
+        , IntAsc0               (..)
+        , DoubleAsc             (..)
+        , DoubleFixedPack       (..))
 where
-import Data.Repa.Convert.Format.Base
-import Data.Repa.Convert.Format.Lists
-import Data.Repa.Convert.Numeric
+import Data.Repa.Convert.Internal.Format
+import Data.Repa.Convert.Internal.Packable
+import GHC.Exts
+import Data.Word
+import qualified Data.Repa.Scalar.Int           as S
+import qualified Data.Repa.Scalar.Double        as S
 import qualified Foreign.ForeignPtr             as F
 import qualified Foreign.Marshal.Utils          as F
+import qualified Foreign.Ptr                    as F
+import Prelude hiding (fail)
+#include "repa-convert.h"
 
 
 ------------------------------------------------------------------------------------------- IntAsc
@@ -15,38 +23,75 @@ import qualified Foreign.Marshal.Utils          as F
 data IntAsc     = IntAsc        deriving (Eq, Show)
 instance Format IntAsc where
  type Value IntAsc      = Int
+
+ fieldCount _           = 1
+ {-# INLINE minSize    #-}
+
  minSize    _           = 1
- fieldCount _           = Just 1
+ {-# INLINE fieldCount #-}
+
  fixedSize  _           = Nothing
+ {-# INLINE fixedSize  #-}
 
  -- Max length of a pretty printed 64-bit Int is 20 bytes including sign.
  packedSize _ _         = Just 20               
+ {-# INLINE packedSize #-}
+
+
+instance Packable IntAsc where
+
+ packer IntAsc (I# v) dst _fails k
+  = do  len     <- S.storeInt# dst v
+        let !(Ptr dst') = F.plusPtr (Ptr dst) len
+        k dst'
+ {-# INLINE packer #-}
+
+ unpacker IntAsc start end _stop fail eat
+  = let !len = I# (minusAddr# end start) in 
+    if len > 0
+     then do
+        S.loadInt (pw8 start) len 
+                fail 
+                (\val (I# off) -> eat (plusAddr# start off) val)
+     else fail
+ {-# INLINE unpacker #-}
+
+
+------------------------------------------------------------------------------------------- IntAsc
+-- | Human-readable ASCII integer,
+--   using leading zeros to pad the encoding out to a fixed length.
+data IntAsc0    = IntAsc0 Int   deriving (Eq, Show)
+instance Format IntAsc0 where
+ type Value IntAsc0     = Int
+ fieldCount _           = 1
+ minSize    _           = 1
+ fixedSize  _           = Nothing
+
+ -- Max length of a pretty printed 64-bit Int is 20 bytes including sign.
+ packedSize (IntAsc0 n) _ = Just (n + 20)
  {-# INLINE minSize    #-}
  {-# INLINE fieldCount #-}
  {-# INLINE fixedSize  #-}
  {-# INLINE packedSize #-}
 
 
-instance Packable IntAsc where
+instance Packable IntAsc0 where
 
- unpack buf len IntAsc k 
-  = do  r       <- loadInt buf len
-        case r of
-          Just (n, o)     -> k (n, o)
-          _               -> return Nothing
- {-# INLINE unpack #-}
+ packer (IntAsc0 (I# pad)) (I# v) dst _fails k
+  = do  len     <- S.storeIntPad# dst v pad
+        let !(Ptr dst') = F.plusPtr (Ptr dst) len
+        k dst'
+ {-# INLINE packer #-}
 
- -- TODO: This is very slow. Avoid going via lists.
- pack   buf IntAsc v k
-  = pack buf VarAsc (show v) k
- {-# INLINE pack #-}
-
-
-instance Packables sep IntAsc where
- packs   buf     _ f x k = pack   buf     f x k
- unpacks buf len _ f k   = unpack buf len f k
- {-# INLINE packs   #-}
- {-# INLINE unpacks #-}
+ unpacker (IntAsc0 _) start end _stop fail eat
+  = let !len = I# (minusAddr# end start) in
+    if  len > 0
+     then do
+        S.loadInt (pw8 start) len
+                fail
+                (\val (I# off) -> eat (plusAddr# start off) val)
+     else fail
+ {-# INLINE unpacker #-}
 
 
 ----------------------------------------------------------------------------------------- DoubleAsc
@@ -54,11 +99,11 @@ instance Packables sep IntAsc where
 data DoubleAsc  = DoubleAsc     deriving (Eq, Show)
 instance Format DoubleAsc where
  type Value DoubleAsc   = Double
+ fieldCount _           = 1
  minSize    _           = 1
- fieldCount _           = Just 1
  fixedSize  _           = Nothing
 
- -- Max length of a pretty-printed 64-bit double is 64 bytes.
+ -- Max length of a pretty-printed 64-bit double is 24 bytes.
  packedSize _ _         = Just 24
  {-# INLINE minSize    #-}
  {-# INLINE fieldCount #-}
@@ -68,22 +113,67 @@ instance Format DoubleAsc where
 
 instance Packable DoubleAsc where
 
- pack   buf DoubleAsc v k
-  = do  (fptr, len)  <- storeDoubleShortest v
+ packer  DoubleAsc v dst _fails k
+  = do  (fptr, len)  <- S.storeDoubleShortest v
         F.withForeignPtr fptr $ \ptr
-         -> F.copyBytes buf ptr len
-        k len
- {-# INLINE pack   #-}
+         -> F.copyBytes (Ptr dst) ptr len
+        let !(Ptr dst') = F.plusPtr (Ptr dst) len
+        k dst'
+ {-# INLINE packer   #-}
 
- unpack buf len DoubleAsc k
-  = do  (v, o)       <- loadDouble buf len
-        k (v, o)
- {-# INLINE unpack #-}
+ unpacker DoubleAsc start end _stop fail eat
+  = let !len = I# (minusAddr# end start) in
+    if len > 0
+      then do
+        (v, I# o)  <- S.loadDouble (pw8 start) len
+        eat (plusAddr# start o) v
+      else fail
+ {-# INLINE unpacker #-}
 
 
-instance Packables sep DoubleAsc where
- packs   buf     _ f x k = pack   buf     f x k
- unpacks buf len _ f k   = unpack buf len f k
- {-# INLINE packs   #-}
- {-# INLINE unpacks #-}
+-------------------------------------------------------------------------------- DoubleFixedPack
+-- | Human-readable ASCII Double.
+-- 
+--   When packing we use a fixed number of zeros after the decimal
+--   point, though when unpacking we allow a greater precision.
+--
+data DoubleFixedPack    = DoubleFixedPack Int   deriving (Eq, Show)
+instance Format DoubleFixedPack where
+ type Value DoubleFixedPack = Double
+ fieldCount _           = 1
+ minSize    _           = 1
+ fixedSize  _           = Nothing
+
+ -- Max length of a pretty-printed 64-bit double is 24 bytes.
+ packedSize (DoubleFixedPack prec) _         
+                        = Just (24 + prec)
+ {-# INLINE minSize    #-}
+ {-# INLINE fieldCount #-}
+ {-# INLINE fixedSize  #-}
+ {-# INLINE packedSize #-}
+
+
+instance Packable DoubleFixedPack where
+
+ packer   (DoubleFixedPack prec) v dst _fails k
+  = do  (fptr, len)  <- S.storeDoubleFixed prec v
+        F.withForeignPtr fptr $ \ptr
+         -> F.copyBytes (Ptr dst) ptr len
+        let !(Ptr dst') = F.plusPtr (Ptr dst) len
+        k dst'
+ {-# INLINE packer #-}
+
+ unpacker (DoubleFixedPack _) start end _stop fail eat
+  = let !len = I# (minusAddr# end start) in
+    if len > 0
+     then do
+       (v, I# o)  <- S.loadDouble (pw8 start) len
+       eat (plusAddr# start o) v
+     else fail
+ {-# INLINE unpacker #-}
+
+
+pw8 :: Addr# -> Ptr Word8
+pw8 addr = Ptr addr
+{-# INLINE pw8 #-}
 

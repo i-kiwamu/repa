@@ -1,15 +1,13 @@
 
 -- | Compile a Repa query to an executable.
 import Config
-import Data.Repa.Query.Convert.JSON                     ()
-import Data.Repa.Query.Build                            as R
-import Data.Repa.Query.Graph                            as R
+import Data.Repa.Query.Graph.JSON                       ()
+import Data.Repa.Query.Build                            as QB
 
 import BuildBox.Build
 import System.FilePath
 import System.Environment
 import qualified BuildBox.Build                         as BB
-import qualified BuildBox.Command.System                as BB
 import qualified Data.Aeson                             as Aeson
 import qualified Data.Aeson.Encode.Pretty               as Aeson
 import qualified Data.ByteString.Lazy.Char8             as BS
@@ -37,72 +35,99 @@ build_mode  config mode file
 
 
 build_build config file
- = case takeExtension file of
-        ".hs"   
-         -> do  dslQuery  <- BB.io $ readFile file
-                _graph    <- R.buildDslViaRepa 
-                                "." (not $ configDump config)
-                                dslQuery  (dropExtension file)
-                return ()
+ | ".hs"        <- takeExtension file
+ = do   dslQuery  <- BB.io $ readFile file
+        let Just pathRoot  = Config.configRootData config
+        let dslConfig      = QB.Config pathRoot
+        egraph    <- QB.buildDslViaRepa 
+                        "." (not $ configDump config)
+                         dslConfig dslQuery  (dropExtension file)
+        checkResult egraph
 
-        ".json" 
-         -> do  jsonQuery <- BB.io $ readFile file
-                _graph    <- R.buildJsonViaRepa 
-                                "." (not $ configDump config)
-                                jsonQuery (dropExtension file)
-                return ()
+ | ".json"      <- takeExtension file
+ = do   jsonQuery <- BB.io $ readFile file
+        graph     <- QB.buildJsonViaRepa 
+                        "." (not $ configDump config)
+                        jsonQuery (dropExtension file)
+        checkResult (Right graph)
 
-        ext -> error $ "Cannot compile a " ++ ext ++ " file to a query."
+ | otherwise
+ =      error $ "Cannot compile a " ++ (takeExtension file) ++ " file to a query."
+ where
+        checkResult (Left err)
+         = error err
+
+        checkResult (Right _graph)
+         = return ()
 
 
+---------------------------------------------------------------------------------------------------
 build_toGraph config file
- = case takeExtension file of
-        ".hs"
-         -> do  dslQuery  <- BB.io $ readFile file
-                graph     <- R.loadQueryFromDSL 
-                                (configDirScratch config) (not $ configDump config)
-                                dslQuery 
-                io $ putStrLn $ show graph
-                return ()
+ -- Convert DSL query to graph AST.
+ | ".hs"        <- takeExtension file
+ = do   dslQuery  <- BB.io $ readFile file
+        let Just pathRoot  = Config.configRootData config
+        let dslConfig      = QB.Config pathRoot
 
-        ".json"
-         -> do  jsonQuery <- BB.io $ readFile file
-                graph     <- R.loadQueryFromJSON
-                                (configDirScratch config) (not $ configDump config)
-                                jsonQuery
-                io $ putStrLn $ show graph
+        egraph    <- QB.loadJobFromDSL 
+                        (configDirScratch config) (not $ configDump config)
+                        dslConfig dslQuery 
+        printErrGraph egraph
 
-        ext -> error $ "Cannot convert a " ++ ext ++ " file to a query."
+ -- Convert JSON query to graph ASt.
+ | ".json"      <- takeExtension file
+ = do   jsonQuery <- BB.io $ readFile file
+        graph     <- QB.loadJobFromJSON
+                        (configDirScratch config) (not $ configDump config)
+                        jsonQuery
+        printErrGraph (Right graph)
+
+ | otherwise
+ =      error $ "Cannot convert a " ++ takeExtension file ++ " file to a query."
+
+ where  printErrGraph (Left err)
+         = error err
+
+        printErrGraph (Right graph)
+         = io $ putStrLn $ show graph
 
 
+---------------------------------------------------------------------------------------------------
 build_toJSON config file
- = case takeExtension file of
-        ".hs"
-         -> do  dslQuery  <- BB.io $ readFile file
+ -- Convert DSL query to json.
+ | ".hs"        <- takeExtension file
+ = do   dslQuery           <- BB.io $ readFile file
+        let Just pathRoot  = Config.configRootData config
+        let dslConfig      = QB.Config pathRoot
 
-                graph     <- R.loadQueryFromDSL 
-                                (configDirScratch config) (not $ configDump config)
-                                dslQuery 
+        egraph  <- QB.loadJobFromDSL 
+                        (configDirScratch config) (not $ configDump config)
+                        dslConfig dslQuery 
 
-                io $ BS.putStrLn 
-                        $ Aeson.encodePretty' aesonConfig
-                        $ Aeson.toJSON graph
+        printErrJSON egraph
 
-                return ()
+ -- Load JSON query and print it back.
+ | ".json"      <- takeExtension file
+ = do   jsonQuery <- BB.io $ readFile file
+        graph     <- QB.loadJobFromJSON
+                        (configDirScratch config) (not $ configDump config)
+                        jsonQuery
 
-        ".json"
-         -> do  jsonQuery <- BB.io $ readFile file
+        printErrJSON (Right graph)
 
-                graph     <- R.loadQueryFromJSON
-                                (configDirScratch config) (not $ configDump config)
-                                jsonQuery
+ | otherwise
+ =      error $ "Cannot convert a " ++ takeExtension file ++ " file to a JSON query."
 
-                io $ BS.putStrLn 
-                        $ Aeson.encodePretty' aesonConfig
-                        $ Aeson.toJSON graph
+ where  printErrJSON (Left err)
+         = error err
 
-        ext -> error $ "Cannot convert a " ++ ext ++ " file to a JSON query."
+        printErrJSON (Right graph)
+         = io $ BS.putStrLn 
+              $ Aeson.encodePretty' aesonConfig
+              $ Aeson.toJSON graph
 
+
+---------------------------------------------------------------------------------------------------
 aesonConfig
  = Aeson.defConfig
         { Aeson.confIndent      = 4

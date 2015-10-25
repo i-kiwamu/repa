@@ -12,19 +12,35 @@ module Data.Repa.Flow.Auto
         , sinksArity
 
         -- * Conversion
+        -- ** List conversion
         , fromList,             fromLists
         , toList1,              toLists1
+
+        -- ** Array conversion
+        , fromArray,            fromArrays
+        , toArray1,             toArrays1
 
         -- * Evaluation
         , drainS
         , drainP
+        , consumeS
 
         -- * Flow Operators
+        -- ** Replicating
+        , replicates_i
+
         -- ** Mapping
         -- | If you want to work on a chunk at a time then use 
         --   `Data.Repa.Flow.Generic.map_i` and
         --   `Data.Repa.Flow.Generic.map_o` from "Data.Repa.Flow.Generic".
         , map_i,                map_o
+        , zipWith_i
+
+        -- ** Processing
+        , process_i
+
+        -- | Higher arity zipWith functions.
+        , module Data.Repa.Flow.Auto.ZipWith
 
         -- ** Connecting
         , dup_oo
@@ -37,11 +53,19 @@ module Data.Repa.Flow.Auto
         , trigger_o
 
         -- ** Ignorance
-        , discard_o
         , ignore_o
+        , abandon_o
 
         -- ** Splitting
         , head_i
+
+        -- ** Concatenation
+        , concat_i
+
+        -- ** Selecting
+        , select_i,             select_o
+        , discard_i,            discard_o
+        , mask_i,               mask_o
 
         -- ** Grouping
         , groups_i
@@ -60,6 +84,9 @@ module Data.Repa.Flow.Auto
         , finalize_i,           finalize_o
         )
 where
+import Data.Repa.Flow.Auto.ZipWith
+import Data.Repa.Flow.Auto.Select
+import Data.Repa.Flow.Auto.Base
 import Data.Repa.Array.Auto                    
         hiding (fromList, fromLists)
 
@@ -67,37 +94,12 @@ import Data.Repa.Array.Material.Auto                    (A(..), Name(..))
 import Data.Repa.Fusion.Unpack                          as A
 import qualified Data.Repa.Array.Meta.Window            as A
 import qualified Data.Repa.Array.Material               as A
-import qualified Data.Repa.Array.Generic.Target         as A
 import qualified Data.Repa.Array.Generic                as A
+import qualified Data.Repa.Array.Generic.Target         as A
 import qualified Data.Repa.Flow.Chunked                 as C hiding (next)
 import qualified Data.Repa.Flow.Generic                 as G hiding (next)
 import Control.Monad
 #include "repa-flow.h"
-
-
--- | A bundle of stream sources, where the elements of the stream
---   are chunked into arrays.
-type Sources a  = C.Sources Int IO A a
-
-
--- | A bundle of stream sinks,   where the elements of the stream
---   are chunked into arrays.
---
-type Sinks a    = C.Sinks Int IO A a
-
-
--- | Yield the number of streams in the bundle.
-sourcesArity :: Sources a -> Int
-sourcesArity = G.sourcesArity
-
-
--- | Yield the number of streams in the bundle.
-sinksArity :: Sinks a -> Int
-sinksArity = G.sinksArity
-
-
--- | Shorthand for common type classes.
-type Flow a     = (C.Flow  Int IO A a, A.Windowable A a)
 
 
 -- Evaluation -----------------------------------------------------------------
@@ -124,43 +126,13 @@ drainP = G.drainP
 {-# INLINE drainP #-}
 
 
--- Conversion -----------------------------------------------------------------
--- | Given an arity and a list of elements, yield sources that each produce all
---   the elements. 
+-- | Pull all available values from the sources and pass them to the
+--   given action.
 --
---   * All elements are stuffed into a single chunk, and each stream is given
---     the same chunk.
---
-fromList :: Build a t
-         => Int -> [a] -> IO (Sources a)
-fromList xs = C.fromList A xs
-{-# INLINE fromList #-}
-
-
--- | Like `fromLists_i` but take a list of lists. Each each of the inner
---   lists is packed into a single chunk.
-fromLists :: Build a t
-          => Int -> [[a]] -> IO (Sources a)
-fromLists xss = C.fromLists A xss
-{-# INLINE fromLists #-}
-
-
--- | Drain a single source from a bundle into a list of elements.
-toList1   :: Build a t
-          => Int -> Sources a -> IO [a]
-toList1 ix s  
- | ix >= G.sourcesArity s = return []
- | otherwise              = C.toList1 ix s 
-{-# INLINE toList1 #-}
-
-
--- | Drain a single source from a bundle into a list of chunks.
-toLists1  :: Build a t
-          => Int -> Sources a -> IO [[a]]
-toLists1 ix s
- | ix >= G.sourcesArity s = return []
- | otherwise              = C.toLists1 ix s 
-{-# INLINE toLists1 #-}
+consumeS :: A.Bulk A a
+         => Sources a -> (Int -> a -> IO ()) -> IO ()
+consumeS = C.consumeS
+{-# INLINE consumeS #-}
 
 
 -- Finalizers -----------------------------------------------------------------
@@ -207,6 +179,16 @@ finalize_o f k
 {-# INLINE finalize_o #-}
 
 
+-- Replicating ----------------------------------------------------------------
+-- | Segmented replicate.
+replicates_i 
+        :: (Flow (Int, a), Build a at, Unpack (A.Buffer A a) att)
+        => Sources (Int, a)     -- ^ Source of segment lengths and values.
+        -> IO (Sources a)       
+replicates_i = C.replicates_i A
+{-# INLINE replicates_i #-}
+
+
 -- Mapping --------------------------------------------------------------------
 -- | Apply a function to all elements pulled from some sources.
 map_i   :: (Flow a, Build b bt)
@@ -220,6 +202,42 @@ map_o   :: (Flow a, Build b bt)
         => (a -> b) -> Sinks b   -> IO (Sinks a)
 map_o f s = C.smap_o (\_ x -> f x) s
 {-# INLINE map_o #-}
+
+
+-- | Combine corresponding elements of two sources with the given function.
+zipWith_i 
+        :: (Flow a, Flow b, Build c bt)
+        => (a -> b -> c) 
+        -> Sources a -> Sources b 
+        -> IO (Sources c)
+zipWith_i f sa sb
+        = C.szipWith_ii A (\_ a b -> f a b) sa sb
+{-# INLINE zipWith_i #-}
+
+
+-- Processing -----------------------------------------------------------------
+-- | Apply a generic stream process to a bundle of sources.
+process_i
+        :: ( Flow a, Flow b, Build b bt
+           , Unpack (Array b) bbt)
+        => (s -> a -> (s, Array b))     -- ^ Worker function.
+        -> s                            -- ^ Initial state.
+        ->     Sources a                -- ^ Input sources.
+        -> IO (Sources b)
+
+process_i = C.process_i
+{-# INLINE process_i #-}
+
+
+-- Concatenation --------------------------------------------------------------
+-- | Concatenate a flow of arrays into a flow of the elements.
+concat_i
+        :: (Flow a, Build a at, Unpack (Array a) att)
+        => Sources (Array a)
+        -> IO (Sources a)
+concat_i ss
+        = G.map_i (A.concat A) ss
+{-# INLINE concat_i #-}
 
 
 -- Connecting -----------------------------------------------------------------
@@ -303,29 +321,28 @@ trigger_o arity f
 
 -- Ignorance ------------------------------------------------------------------
 -- | Create a bundle of sinks of the given arity that drop all data on the
---   floor.
+--   floor. 
 --
---   * The sinks is strict in the *chunks*, so they are demanded before being
---     discarded. 
 --   * Haskell debugging thunks attached to the chunks will be
 --     demanded, but thunks attached to elements may not be -- depending on
 --     whether the chunk representation is strict in the elements.
 --
-discard_o :: Int -> IO (Sinks a)
-discard_o = G.discard_o
-{-# INLINE discard_o #-}
-
-
--- | Create a bundle of sinks of the given arity that drop all data on the
---   floor. 
---
---   * As opposed to `discard_o` the sinks are non-strict in the chunks.
---   * Haskell debugging thunks attached to the chunks will *not* be 
---     demanded.
---
 ignore_o :: Int -> IO (Sinks a)
 ignore_o  = G.ignore_o
 {-# INLINE ignore_o #-}
+
+
+-- | Create a bundle of sinks of the given arity that drop all data on the
+--   floor.
+--
+--   * As opposed to `ignore_o` the sinks are non-strict in the chunks.
+--   * Haskell debugging thunks attached to the chunks will *not* be 
+--     demanded.
+--
+abandon_o :: Int -> IO (Sinks a)
+abandon_o = G.abandon_o
+{-# INLINE abandon_o #-}
+
 
 
 -- Splitting ------------------------------------------------------------------

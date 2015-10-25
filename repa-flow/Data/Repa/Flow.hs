@@ -10,6 +10,7 @@
 -- @
 -- > import Data.Repa.Array           as A
 -- > import Data.Repa.Flow            as F
+-- > import Data.Repa.Flow.IO         as F
 -- > import Data.Repa.Flow.Auto.Debug as F
 --
 -- > ws <- fromFiles [\"\/usr\/share\/dict\/words\", \"\/usr\/share\/dict\/cracklib-small\"] sourceLines
@@ -123,18 +124,30 @@ module Data.Repa.Flow
         , drainP
 
         -- * Conversion
+        -- ** List conversion
         , fromList,             fromLists
         , toList1,              toLists1
+
+        -- ** Array conversion
+        , fromArray,            fromArrays
+        , toArray1,             toArrays1
 
         -- * Finalizers
         , finalize_i,           finalize_o
 
         -- * Flow Operators
+        -- ** Replicating
+        , replicates_i
+
         -- ** Mapping
-          -- | If you want to work on a chunk at a time then use 
-          --   `Data.Repa.Flow.Generic.map_i` and
-          --   `Data.Repa.Flow.Generic.map_o` from "Data.Repa.Flow.Generic".
+        -- | If you want to work on a chunk at a time then use 
+        --   `Data.Repa.Flow.Generic.map_i` and
+        --   `Data.Repa.Flow.Generic.map_o` from "Data.Repa.Flow.Generic".
         , map_i,                map_o
+        , zipWith_i
+
+        -- | Higher arity zipWith functions.
+        , module Data.Repa.Flow.Auto.ZipWith
 
         -- ** Connecting
         , dup_oo
@@ -147,11 +160,19 @@ module Data.Repa.Flow
         , trigger_o
 
         -- ** Ignorance
-        , discard_o
         , ignore_o
+        , abandon_o
 
         -- ** Splitting
         , head_i
+
+        -- ** Concatenation
+        , concat_i
+
+        -- ** Selecting
+        , select_i,             select_o
+        , discard_i,            discard_o
+        , mask_i,               mask_o
 
         -- ** Grouping
         , groups_i
@@ -164,33 +185,11 @@ module Data.Repa.Flow
 
         -- *** Segmented
         , folds_i,              FoldsDict
-        , foldGroupsBy_i,       FoldGroupsDict
-
-        -- * Flow I/O
-        , defaultChunkSize
-
-        -- ** Buckets
-        , module Data.Repa.Flow.IO.Bucket
-
-        -- ** Sourcing
-        , sourceCSV
-        , sourceTSV
-        , sourceRecords
-        , sourceLines
-        , sourceChars
-        , sourceBytes
---        , sourcePacked
-
-        -- ** Sinking
-        , sinkChars
-        , sinkLines
-        , sinkBytes
---        , sinkPacked
-        )
+        , foldGroupsBy_i,       FoldGroupsDict)
 where
 import Data.Repa.Flow.Auto
 import Data.Repa.Flow.Auto.Debug
-import Data.Repa.Flow.Auto.IO
+import Data.Repa.Flow.Auto.ZipWith
 import Data.Repa.Flow.IO.Bucket
 import Data.Repa.Flow.States
 

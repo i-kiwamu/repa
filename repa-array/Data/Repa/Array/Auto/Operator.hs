@@ -12,7 +12,14 @@ module Data.Repa.Array.Auto.Operator
         , index
         , (!)
         , length
-        , head, tail, init
+        , first, last
+        , head,  tail, init
+
+        -- * Construction
+        , empty
+        , singleton
+        , generateMaybeS,  mapMaybeS
+        , generateEitherS, mapEitherS
 
         -- * Conversion
         , fromList
@@ -25,6 +32,9 @@ module Data.Repa.Array.Auto.Operator
 
         -- * Operators
 
+        -- ** Replicating
+        , replicates
+
         -- ** Mapping
         , map
         , map2
@@ -32,7 +42,7 @@ module Data.Repa.Array.Auto.Operator
 
         -- ** Folding
         , foldl
-        , sum,  prod
+        , sum,  product
         , mean, std
 
         -- *** Special Folds
@@ -77,6 +87,9 @@ module Data.Repa.Array.Auto.Operator
         , compact
         , compactIn
 
+        -- ** Processing
+        , process
+
         -- ** Grouping
         , groups
         , groupsWith
@@ -104,8 +117,9 @@ import qualified Data.Repa.Fusion.Unpack                as F
 import qualified Data.Repa.Chain                        as C
 import qualified Data.Vector.Unboxed                    as U
 import Prelude 
-       hiding   ( map, length, reverse, filter, concat, unlines, foldl, sum, zip, unzip
-                , head, tail, init)
+       hiding   ( map,  length, reverse, filter, concat, unlines, foldl
+                , sum,  product, zip, unzip
+                , head, tail, init, last)
 
 
 -- Basic ------------------------------------------------------------------------------------------
@@ -130,11 +144,21 @@ length = G.length
 {-# INLINE length #-}
 
 
--- | O(1). Take the head of an array, or `Nothing` if it's empty.
+-- | O(1). Take the first element of an array, or `Nothing` if it's empty.
+first   :: Elem a => Array a -> Maybe a
+first   = G.first
+{-# INLINE first #-}
+
+
+-- | O(1). Take the last element of an array, or `Nothing` if it's empty.
+last    :: Elem a => Array a -> Maybe a
+last    = G.last
+{-# INLINE last #-}
+
+
+-- | O(1). alias for `first`.
 head    :: Elem a => Array a -> Maybe a
-head arr   = if G.length arr < 1
-                then Nothing
-                else Just (arr `index` 0)
+head    = G.first
 {-# INLINE head #-}
 
 
@@ -148,6 +172,65 @@ tail    = A.tail
 init    :: Elem a => Array a -> Maybe (Array a)
 init    = A.init
 {-# INLINE init #-}
+
+
+-- Construction -----------------------------------------------------------------------------------
+-- | O(1). An empty array of the given layout.
+empty   :: Build a at
+        => Array a
+empty = G.empty A
+{-# INLINE empty #-}
+
+
+-- | O(1). Create a new empty array containing a single element.
+singleton 
+        :: Build a at
+        => a -> Array a
+singleton = G.singleton A
+{-# INLINE singleton #-}
+
+
+-- | Like `generateS` but use a function that produces Maybe an element.
+--   If any element returns `Nothing`, then `Nothing` for the whole array.
+generateMaybeS
+        :: Build a at
+        => Int -> (Int -> Maybe a) 
+        -> Maybe (Array a)
+generateMaybeS = G.generateMaybeS A
+{-# INLINE generateMaybeS #-}
+
+
+-- | Apply a function to every element of an array, 
+--   if any application returns `Nothing`, then `Nothing` for the whole result.
+mapMaybeS 
+        :: (Elem a, Build b bt)
+        => (a -> Maybe b) 
+        -> Array a
+        -> Maybe (Array b)
+mapMaybeS = G.mapMaybeS A
+{-# INLINE mapMaybeS #-}
+
+
+-- | Like `generateS` but use a function that produces Either some error
+--   or an element. If any element returns `Nothing`, then `Nothing` for
+--   the whole array.
+generateEitherS
+        :: Build a at
+        => Int -> (Int -> Either err a) 
+        -> Either err (Array a)
+generateEitherS = G.generateEitherS A
+{-# INLINE generateEitherS #-}
+
+
+-- | Apply a function to every element of an array, 
+--   if any application returns `Left`, then `Left` for the whole result.
+mapEitherS 
+        :: (Elem a, Build b bt)
+        => (a -> Either err b) 
+        -> Array a
+        -> Either err (Array b)
+mapEitherS = G.mapEitherS A
+{-# INLINE mapEitherS #-}
 
 
 -- Conversion -------------------------------------------------------------------------------------
@@ -205,6 +288,17 @@ reverse arr = G.computeS A $! A.reverse arr
 {-# INLINE reverse #-}
 
 
+-- Replicating ------------------------------------------------------------------------------------
+-- | Segmented replicate.
+replicates 
+        :: (Elem a, Build a at)
+        => Array (Int, a) -> Array a
+
+replicates arr
+ = G.replicates A arr
+{-# INLINE replicates #-}
+
+
 -- Mapping ----------------------------------------------------------------------------------------
 -- | Apply a function to all the elements of a list.
 map     :: (Elem a, Build b bt)
@@ -259,9 +353,9 @@ sum   = G.sum
 
 
 -- | Yield the product of the elements of an array.
-prod   :: (Elem a, Num a) => Array a -> a
-prod   = G.prod
-{-# INLINE prod #-}
+product   :: (Elem a, Num a) => Array a -> a
+product = G.product
+{-# INLINE product #-}
 
 
 -- | Yield the mean value of the elements of an array.
@@ -529,7 +623,7 @@ mergeMaybe = G.mergeMaybe A
 --   At each point we can chose to emit an element (or not)
 --
 compact :: (Elem a, Build b bt)
-        => (s -> a -> (Maybe b, s))
+        => (s -> a -> (s, Maybe b))
         -> s
         -> Array a
         -> Array b
@@ -541,11 +635,23 @@ compact = G.compact A
 --   initial state, and add the final state to the end of the output.
 compactIn
         :: Build a at
-        => (a -> a -> (Maybe a, a))
+        => (a -> a -> (a, Maybe a))
         -> Array a
         -> Array a
 compactIn = G.compactIn A
 {-# INLINE compactIn #-}
+
+
+-- | Apply a generic stream process to an array.
+process :: ( Build a at, Build b bt, Elem b
+           , F.Unpack (G.Array A.A b) t
+           , G.Target A.A b)
+        => (s -> a -> (s, Array b))     -- ^ Worker function
+        -> s                            -- ^ Initial state.
+        -> Array a                      -- ^ Input array.
+        -> (s, Array b)                 -- ^ Result state and array.
+process   = G.process A
+{-# INLINE process #-}
 
 
 -- Inserting --------------------------------------------------------------------------------------

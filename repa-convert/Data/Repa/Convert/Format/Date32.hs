@@ -3,29 +3,27 @@ module Data.Repa.Convert.Format.Date32
         ( YYYYsMMsDD (..)
         , DDsMMsYYYY (..))
 where
-import Data.Repa.Convert.Format.Base
+import Data.Repa.Convert.Internal.Packable
+import Data.Repa.Convert.Internal.Packer
 import Data.Repa.Convert.Format.Numeric
 import Data.Repa.Convert.Format.Binary
-import Data.Repa.Convert.Date32
-import Data.Repa.Bits.Date32                    (Date32)
+import Data.Monoid
 import Data.Char
 import Data.Word
-import qualified Data.Repa.Bits.Date32          as Date32
-import qualified Foreign.Ptr                    as S
-
-
-cw8 :: Char -> Word8
-cw8 c = fromIntegral $ ord c
-{-# INLINE cw8 #-}
+import GHC.Exts
+import Data.Repa.Scalar.Date32                  (Date32)
+import qualified Data.Repa.Scalar.Date32        as Date32
+import Prelude hiding (fail)
+#include "repa-convert.h"
 
 
 ---------------------------------------------------------------------------------------- YYYYsMMsDD
--- | Date32 in ASCII YYYYsMMsDD format.
+-- | Human readable ASCII date in YYYYsMMsDD format.
 data YYYYsMMsDD         = YYYYsMMsDD Char       deriving (Eq, Show)
 instance Format YYYYsMMsDD where
  type Value YYYYsMMsDD  = Date32
+ fieldCount _           = 1
  minSize    _           = 10
- fieldCount _           = Just 1
  fixedSize  _           = Just 10
  packedSize _ _         = Just 10
  {-# INLINE minSize    #-}
@@ -36,41 +34,38 @@ instance Format YYYYsMMsDD where
 
 instance Packable YYYYsMMsDD where
 
- unpack buf len (YYYYsMMsDD s) k
-  = do  r       <- loadYYYYsMMsDD (fromIntegral $ ord s) buf len
-        case r of
-         Just (d, o)    -> k (d, o)
-         Nothing        -> return Nothing
- {-# INLINE unpack #-}
-
- pack   buf  (YYYYsMMsDD s) v k
-  | (yy', mm', dd')        <- Date32.unpack v
-  , yy  <- fromIntegral yy'
-  , mm  <- fromIntegral mm'
-  , dd  <- fromIntegral dd'
-  =  pack buf                                   IntAsc   yy     $ \oy  -> 
-     pack (S.plusPtr buf oy)                    Word8be (cw8 s) $ \os1 ->
-     pack (S.plusPtr buf (oy + os1))            IntAsc   mm     $ \om  ->
-     pack (S.plusPtr buf (oy + os1 + om))       Word8be (cw8 s) $ \os2 ->
-     pack (S.plusPtr buf (oy + os1 + om + os2)) IntAsc   dd     $ \od  -> 
-     k (oy + os1 + om + os2 + od)
+ pack  (YYYYsMMsDD s) !v
+  = let (yy', mm', dd') = Date32.unpack v
+        !yy     = fromIntegral yy'
+        !mm     = fromIntegral mm'
+        !dd     = fromIntegral dd'
+    in     pack (IntAsc0 4) yy
+        <> pack Word8be     (cw8 s)
+        <> pack (IntAsc0 2) mm
+        <> pack Word8be     (cw8 s)
+        <> pack (IntAsc0 2) dd
  {-# INLINE pack #-}
 
+ packer f v
+  = fromPacker (pack f v)
+ {-# INLINE packer #-}
 
-instance Packables sep YYYYsMMsDD where
- packs   buf     _ f x k = pack   buf     f x k
- unpacks buf len _ f k   = unpack buf len f k
- {-# INLINE packs   #-}
- {-# INLINE unpacks #-}
+ unpacker (YYYYsMMsDD s) start end _stop fail eat
+  = do  let len = I# (minusAddr# end start)
+        r       <- Date32.loadYYYYsMMsDD (fromIntegral $ ord s) (pw8 start) len
+        case r of
+         Just (d, I# o) -> eat (plusAddr# start o) d
+         Nothing        -> fail
+ {-# INLINE unpack #-}
 
 
 ---------------------------------------------------------------------------------------- DDsMMsYYYY
--- | Date32 in ASCII DDsMMsYYYY format.
+-- | Human readable ASCII date in DDsMMsYYYY format.
 data DDsMMsYYYY         = DDsMMsYYYY Char       deriving (Eq, Show)
 instance Format DDsMMsYYYY where
  type Value DDsMMsYYYY  = Date32
+ fieldCount _           = 1
  minSize    _           = 10
- fieldCount _           = Just 1
  fixedSize  _           = Just 10
  packedSize _ _         = Just 10
  {-# INLINE minSize    #-}
@@ -81,30 +76,39 @@ instance Format DDsMMsYYYY where
 
 instance Packable DDsMMsYYYY where
 
- unpack buf len (DDsMMsYYYY s) k
-  = do  r       <- loadDDsMMsYYYY (fromIntegral $ ord s) buf len
-        case r of
-         Just (d, o)    -> k (d, o)
-         Nothing        -> return Nothing
- {-# INLINE unpack #-}
-
- pack   buf     (DDsMMsYYYY s) v k
-  | (yy', mm', dd')        <- Date32.unpack v
-  , yy  <- fromIntegral yy'
-  , mm  <- fromIntegral mm'
-  , dd  <- fromIntegral dd'
-  =  pack buf                                   IntAsc   dd     $ \od  -> 
-     pack (S.plusPtr buf  od)                   Word8be (cw8 s) $ \os1 ->
-     pack (S.plusPtr buf (od + os1))            IntAsc   mm     $ \om  ->
-     pack (S.plusPtr buf (od + os1 + om))       Word8be (cw8 s) $ \os2 ->
-     pack (S.plusPtr buf (od + os1 + om + os2)) IntAsc   yy     $ \oy  -> 
-     k (od + os1 + om + os2 + oy)
+ pack   (DDsMMsYYYY s) !v
+  = let (yy', mm', dd') = Date32.unpack v
+        !yy     = fromIntegral yy'
+        !mm     = fromIntegral mm'
+        !dd     = fromIntegral dd'
+    in     pack (IntAsc0 2) dd
+        <> pack Word8be     (cw8 s)
+        <> pack (IntAsc0 2) mm
+        <> pack Word8be     (cw8 s)
+        <> pack (IntAsc0 4) yy
  {-# INLINE pack #-}
 
+ packer f v
+  = fromPacker (pack f v)
+ {-# INLINE packer #-}
 
-instance Packables sep DDsMMsYYYY where
- packs   buf     _ f x k = pack   buf     f x k
- unpacks buf len _ f k   = unpack buf len f k
- {-# INLINE packs   #-}
- {-# INLINE unpacks #-}
+ unpacker (DDsMMsYYYY s) start end _stop fail eat
+  = do
+        let len = I# (minusAddr# end start)
+        r       <- Date32.loadDDsMMsYYYY (fromIntegral $ ord s) (pw8 start) len
+        case r of
+         Just (d, I# o)    -> eat (plusAddr# start o) d
+         Nothing           -> fail
+ {-# INLINE unpack #-}
+
+
+---------------------------------------------------------------------------------------------------
+cw8 :: Char -> Word8
+cw8 c = fromIntegral $ ord c
+{-# INLINE cw8 #-}
+
+pw8 :: Addr# -> Ptr Word8
+pw8 addr = Ptr addr
+{-# INLINE pw8 #-}
+
 

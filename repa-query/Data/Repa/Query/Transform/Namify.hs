@@ -6,6 +6,7 @@ module Data.Repa.Query.Transform.Namify
 where
 import Control.Monad
 import Data.Repa.Query.Graph            as Q
+import Data.Repa.Query.Job.Spec         as Q
 import Data.Map                         (Map)
 import qualified Data.Map               as Map
 
@@ -39,8 +40,8 @@ class Namify (c :: * -> * -> *) where
 
 
 instance Namify (Query a nF) where
- namify nam (Query nf delim fields gg)
-        = liftM (Query nf delim fields) (namify nam gg)
+ namify nam (Query fOut graph)
+        = liftM (Query fOut) (namify nam graph)
 
 
 instance Namify (Graph a nF) where
@@ -61,8 +62,8 @@ instance Namify (Node a nF) where
 instance Namify (FlowOp a nF) where
  namify nam fop
   = case fop of
-        FopMapI    fin fout xx
-         -> liftM  (FopMapI fin fout)    (namify nam xx)
+        FopMapI    fins fout xx
+         -> liftM  (FopMapI fins fout)   (namify nam xx)
 
         FopFilterI fin fout xx
          -> liftM  (FopFilterI fin fout) (namify nam xx)

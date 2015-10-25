@@ -14,6 +14,9 @@ data Config
           --   can be the Haskell EDSL, or a JSON operator graph.
         , configQuery           :: Maybe FilePath 
 
+          -- | Root directory containing meta data for tables.
+        , configRootData        :: Maybe FilePath
+
           -- | Dump intermediate files.
         , configDump            :: Bool 
 
@@ -26,7 +29,8 @@ configZero :: Config
 configZero
         = Config
         { configMode            = ModeBuild
-        , configQuery           = Nothing 
+        , configQuery           = Nothing
+        , configRootData        = Just "." 
         , configDump            = False 
         , configDirScratch      = "." }
 
@@ -48,7 +52,8 @@ data Mode
 parseArgs :: [String] -> Config -> IO Config
 
 parseArgs [] config
- | isJust $ configQuery config
+ | isJust $ configQuery    config
+ , isJust $ configRootData config
  = return config
 
  | otherwise    = dieUsage
@@ -56,16 +61,19 @@ parseArgs [] config
 parseArgs args config
  | "-query" : file : rest  <- args
  , Nothing                 <- configQuery config
- = parseArgs rest $ config { configQuery = Just file }
+ = parseArgs rest $ config { configQuery    = Just file }
 
- | "-dump" : rest            <- args
- = parseArgs rest $ config { configDump  = True }
+ | "-root-data" : path : rest  <- args
+ = parseArgs rest $ config { configRootData = Just path }
+
+ | "-dump"  : rest         <- args
+ = parseArgs rest $ config { configDump     = True }
 
  | "-to-graph" : rest      <- args
- = parseArgs rest $ config { configMode  = ModeToGraph }
+ = parseArgs rest $ config { configMode     = ModeToGraph }
 
  | "-to-json"  : rest      <- args
- = parseArgs rest $ config { configMode  = ModeToJSON }
+ = parseArgs rest $ config { configMode     = ModeToJSON }
 
  | file : rest             <- args
  , x : _                   <- file
@@ -80,11 +88,12 @@ parseArgs args config
 -- | Die on wrong usage at command line.
 dieUsage
  = error $ P.unlines
- [ "Usage: build -query FILE [OPTIONS]"
+ [ "Usage: build -root-data PATH FILE  [OPTIONS]"
  , "Compile a Repa query into an executable."
  , "The query can be written in either the query DSL, or in the JSON format."
  , ""
  , "OPTIONS:"
+ , " -root-data PATH    (required) Root path containing table meta data."
  , " -dump              Dump intermediate files."
  , " -to-graph          Emit operator graph in Haskell syntax."
  , " -to-json           Emit operator graph in JSON syntax." ]

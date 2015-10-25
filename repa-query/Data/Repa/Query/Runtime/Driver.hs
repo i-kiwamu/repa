@@ -1,52 +1,202 @@
 
--- | Drivers used by queries compiled via Repa.
+-- | Drivers used to run the various jobs.
 --
---   This code is imported by the generated query code and used by the 
---   running queries, rather than being used at query compile time.
+--   These drivers are used by the code that runs at query execution time.
+--   We have a driver for each of the job types defined in "Data.Repa.Query.Job".
 --
 module Data.Repa.Query.Runtime.Driver
-        (streamSourcesToStdout)
+        ( execQuery
+
+        -- * Extraction
+        , execExtract
+        , pattern ExtractTargetFile
+
+        -- * Sieve
+        , execSieve
+        , pattern SieveTargetDir)
 where
-import Data.Repa.Flow                                   as F
 import Data.Word
-import System.IO
+import Data.Maybe
+import System.FilePath
+
+import qualified Data.Repa.Flow                         as F
+import qualified Data.Repa.Flow.Auto.IO                 as F
 import qualified Data.Repa.Flow.Generic                 as FG
+import qualified Data.Repa.Flow.Generic.IO              as FG
+
+import qualified Data.Repa.Query.Job.Spec               as QJ
 import qualified Data.Repa.Array.Generic                as AG
-import qualified Data.Repa.Array.Material.Foreign       as AF
 import qualified Data.Repa.Array.Material.Auto          as AA
-import qualified Foreign.Ptr                            as Foreign
-import qualified Foreign.ForeignPtr                     as Foreign
+import qualified Data.Repa.Array.Material.Foreign       as AF
+
+import qualified System.Environment                     as System
+import qualified System.Directory                       as System
+import qualified System.IO                              as System
+
+import Prelude                                          as P
+#include "repa-query.h"
 
 
--- | Read data from a bundle of sources and write it to stdout.
---  
---   This function only works for sources bundles containing a single stream.
---   If this is not true then the function returns False, and no data is
---   written to stdout.
+---------------------------------------------------------------------------------------------------
+-- | Top level driver for a query job.
 --
+--   The query takes the path to the root data directory as its first argument.
+--
+execQuery 
+        :: (FilePath -> IO (F.Sources (AA.Array AA.A Word8)))
+        -> IO ()
+
+execQuery makeSources
+ = do
+        -- Parse command-line arguments.
+        args    <- System.getArgs
+        config  <- parseArgs args configZero
+        let Just pathRootData = configRootData config
+
+        -- Build the flow sources.
+        ss      <- makeSources pathRootData
+
+        -- Stream data from flow sources to stdout.
+        streamSourcesToStdout ss
+        return  ()
+{-# INLINE execQuery #-}
+
+
+---------------------------------------------------------------------------------------------------
+-- | Top level driver for an extract job.
+--
+--   The query takes the path to the root data directory as its first argument.
+--
+execExtract
+        :: (FilePath -> IO (F.Sources (AA.Array AA.A Word8)))
+        -> QJ.ExtractTarget 
+        -> IO ()
+
+execExtract makeSources target
+ = do
+        -- Parse command-line arguments.
+        args    <- System.getArgs
+        config  <- parseArgs args configZero
+        let Just pathRootData = configRootData config
+
+        -- Build the flow sources.
+        ss      <- makeSources pathRootData
+
+        -- Stream data from flow sources to stdout.
+        case target of
+         QJ.ExtractTargetFile fileOut
+          -> streamSourcesToFile ss fileOut
+
+{-# INLINE execExtract #-}
+
+
+-- Pattern synonyms for extract targets so that generated
+-- code that uses them only needs to import this module.
+pattern ExtractTargetFile file  = QJ.ExtractTargetFile file
+
+
+---------------------------------------------------------------------------------------------------
+-- | Top level driver for a sieve job.
+--
+--   The query takes the path to the root data directory as its first argument.
+--
+execSieve 
+        :: (FilePath -> IO (F.Sources (String, AA.Array AA.A Word8)))
+        -> QJ.SieveTarget
+        -> IO ()
+
+execSieve makeSources target
+ = do   
+        -- Parse command-line arguments.
+        args    <- System.getArgs
+        config  <- parseArgs args configZero
+        let Just pathRootData = configRootData config
+
+        -- Build the flow sources.
+        ss      <- makeSources pathRootData
+
+        -- Stream data from flow sources to stdout.
+        case target of
+         QJ.SieveTargetDir dirOut
+          -> do
+                System.createDirectoryIfMissing True dirOut
+                sRows   <-  FG.unchunk_i 
+                        =<< FG.funnel_i ss
+
+                let mkRow (k, arr) = Just (dirOut </> k, AG.convert AF.F arr)
+                oSieve  <- FG.sieve_o mkRow
+                FG.drainS sRows oSieve
+
+
+-- Pattern synonyms for sieve targets so that generated
+-- code that uses them only needs to import this module.
+pattern SieveTargetDir  dir     = QJ.SieveTargetDir dir
+
+
+---------------------------------------------------------------------------------------------------
+-- | Read data from a bundle of sources and write it to stdout.
 streamSourcesToStdout
-        :: Sources Word8 -> IO Bool
+        :: F.Sources (AA.Array AA.A Word8)
+        -> IO ()
 
-streamSourcesToStdout (FG.Sources 1 pullX)
- = do   go
-        return True
+streamSourcesToStdout ss
+ = do   ss0     <-  FG.funnel_i 
+                =<< FG.map_i (AG.concat AA.A) ss
 
- where  go 
-         = pullX 0 eat_streamSource eject_streamSource
+        ss1     <- FG.mapIndex_i (\_ -> 1) (\_ -> ()) ss0
 
-        eat_streamSource (chunk :: AG.Array AA.A Word8)
-         = do   let (start, len, fptr :: Foreign.ForeignPtr Word8) 
-                        = AF.toForeignPtr $ AG.convert AF.F chunk
+        b       <- F.hBucket System.stdout
+        let bs  =  AG.fromList AA.B [b]
+        ks      <- F.sinkBytes bs 
+        F.drainP ss1 ks
+{-# INLINE_FLOW streamSourcesToStdout #-}
 
-                Foreign.withForeignPtr fptr $ \ptr 
-                 -> hPutBuf stdout (ptr `Foreign.plusPtr` start) len
 
-                hFlush stdout
-                go
+-- | Read data from a bundle of sources and write it to a single file.
+streamSourcesToFile 
+        :: F.Sources (AA.Array AA.A Word8) 
+        -> FilePath 
+        -> IO ()
 
-        eject_streamSource
-         = do   hClose stdout
-                return ()
+streamSourcesToFile ss filePath
+ = do   ss0     <-  FG.funnel_i 
+                =<< FG.map_i (AG.concat AA.A) ss
 
-streamSourcesToStdout _
- = return False
+        ss1     <- FG.mapIndex_i (\_ -> 1) (\_ -> ()) ss0
+        ks      <- F.toFiles [filePath] F.sinkBytes
+        F.drainP ss1 ks
+{-# INLINE_FLOW streamSourcesToFile #-}
+
+
+---------------------------------------------------------------------------------------------------
+-- | Parse command line arguments given to query.
+parseArgs :: [String] -> Config -> IO Config
+parseArgs [] config
+ | isJust $ configRootData config
+ = return config
+ | otherwise = dieUsage
+
+parseArgs args config
+ | "-root-data" : path : rest   <- args
+ = parseArgs rest $ config { configRootData = Just path }
+
+ | otherwise
+ = dieUsage
+
+dieUsage 
+ = error $ P.unlines
+ [ "Usage: query -root-data <PATH>"
+ , "Execute a Repa query."
+ , ""
+ , "OPTIONS:"
+ , " -root-data PATH    (required) Root path containing table data." ]
+
+
+-- | Query command-line config.
+data Config
+        = Config
+        { configRootData        :: Maybe FilePath }
+
+configZero 
+        = Config Nothing
+

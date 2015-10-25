@@ -30,7 +30,14 @@ module Data.Repa.Array
         , index
         , (!)
         , length
-        , head, tail, init
+        , first, last
+        , head,  tail, init
+
+        -- * Construction
+        , empty
+        , singleton
+        , generateMaybeS
+        , generateEitherS
 
         -- * Conversion
         , fromList
@@ -43,6 +50,9 @@ module Data.Repa.Array
 
         -- * Operators
 
+        -- ** Replicating
+        , replicates
+
         -- ** Mapping
         , map
         , map2
@@ -54,7 +64,7 @@ module Data.Repa.Array
         , foldsWith
 
         -- *** Special Folds
-        , sum,  prod
+        , sum,  product
         , mean, std
         , correlate
 
@@ -104,11 +114,34 @@ module Data.Repa.Array
         , segmentOn
         , dice
         , diceSep
+
+        -- ** Products
+
+        -- *** Generic
+        , prod
+        , unprod
+
+        -- *** Pattern synonyms
+        -- | These patterns patterns work on arrays of arbitrary element type.
+        --   
+        --   (Haddock 2.16.0 has a bug where the type signatures come out monomorphic)
+        --
+        , pattern Prod2
+        , pattern Prod3
+        , pattern Prod4
+        , pattern Prod5
+        , pattern Prod6
+        , pattern Prod7
+        , pattern Prod8
+        , pattern Prod9
         )
 where
 import Data.Repa.Array.Auto
 import Prelude 
-       hiding   ( map, length, reverse, filter, concat, unlines, foldl, sum
-                , head, init, tail, zip, unzip)
+ hiding ( map, length, reverse, filter, concat, unlines, foldl
+        , sum, product
+        , last
+        , head, init, tail
+        , zip, unzip)
 
 

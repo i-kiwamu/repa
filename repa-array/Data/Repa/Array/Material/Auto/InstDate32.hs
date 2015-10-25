@@ -1,21 +1,21 @@
 {-# LANGUAGE    UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans    #-}
 module Data.Repa.Array.Material.Auto.InstDate32
-        ( rangeDate32
-        , prettyDate32 )
+        (rangeDate32)
 where
-import qualified Data.Repa.Array.Generic.Target         as A
-import qualified Data.Repa.Array.Generic.Index          as A
+import Data.Repa.Array.Material.Auto.InstChar           ()
 import qualified Data.Repa.Array.Material.Auto.Base     as A
 import qualified Data.Repa.Array.Material.Foreign       as A
+import qualified Data.Repa.Array.Internals.Target       as A
+import qualified Data.Repa.Array.Generic.Index          as A
 import qualified Data.Repa.Array.Generic                as A
 import qualified Data.Repa.Array.Meta.Window            as A
 import qualified Data.Repa.Fusion.Unpack                as A
-import Data.Repa.Bits.Date32
-import GHC.Exts
+import Data.Repa.Scalar.Date32
 import Control.Monad
 import Prelude                                          as P
 #include "repa-array.h"
+
 
 instance A.Bulk A.A Date32 where
  data Array A.A Date32           = AArray_Date32 !(A.Array A.F Date32)
@@ -96,22 +96,4 @@ rangeDate32 from to
                 | d > to        = P.reverse acc
                 | otherwise     = go (d : acc) (next d)
 {-# NOINLINE rangeDate32 #-}
-
-
----------------------------------------------------------------------------------------------------
--- | Pretty print a `Date32`
----
---  TODO: avoid going via lists.
---
-prettyDate32  
-        :: Char         -- ^ Separator for components.
-        -> Date32       -- ^ Date to pretty print.
-        -> A.Array A.A Char
-
-prettyDate32 !cSep !date
- = let  (yy, mm, dd)    = unpack date
-        yy'             = show yy
-        mm'             = if mm < 10 then "0" ++ show mm else show mm
-        dd'             = if dd < 10 then "0" ++ show dd else show dd
-   in   A.fromList A.A $ P.concat [yy', [cSep], mm', [cSep], dd']
 

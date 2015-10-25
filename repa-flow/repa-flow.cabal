@@ -1,5 +1,5 @@
 Name:           repa-flow
-Version:        4.1.0.1
+Version:        4.2.0.0
 License:        BSD3
 License-file:   LICENSE
 Author:         The Repa Development Team
@@ -25,8 +25,9 @@ Library
         text                    == 1.2.*,
         repa-eval               == 4.0.0.*,
         repa-stream             == 4.1.0.*,
-        repa-array              == 4.1.0.*,
-        repa-convert            == 4.1.0.*
+        repa-scalar             == 4.2.0.*,
+        repa-convert            == 4.2.0.*,
+        repa-array              == 4.2.0.*
 
   exposed-modules:
         Data.Repa.Flow.Auto
@@ -34,6 +35,7 @@ Library
         Data.Repa.Flow.Auto.IO
         Data.Repa.Flow.Auto.Format        
         Data.Repa.Flow.Auto.SizedIO
+        Data.Repa.Flow.Auto.ZipWith
 
         Data.Repa.Flow.Chunked
         Data.Repa.Flow.Chunked.IO
@@ -42,9 +44,7 @@ Library
         Data.Repa.Flow.Generic.Debug
         Data.Repa.Flow.Generic.IO
 
-        Data.Repa.Flow.IO.Binary
         Data.Repa.Flow.IO.Bucket
-        Data.Repa.Flow.IO.Storable
 
         Data.Repa.Flow.Simple
 
@@ -53,18 +53,24 @@ Library
         Data.Repa.Flow
 
   other-modules:
+        Data.Repa.Flow.Auto.Base
+        Data.Repa.Flow.Auto.Select
+
         Data.Repa.Flow.Chunked.Base
         Data.Repa.Flow.Chunked.Map
         Data.Repa.Flow.Chunked.Fold
         Data.Repa.Flow.Chunked.Folds
         Data.Repa.Flow.Chunked.Groups
-        Data.Repa.Flow.Chunked.Operator
+        Data.Repa.Flow.Chunked.Generic
+        Data.Repa.Flow.Chunked.Process
+        Data.Repa.Flow.Chunked.Replicate
 
         Data.Repa.Flow.Generic.Base
         Data.Repa.Flow.Generic.Connect
         Data.Repa.Flow.Generic.List
         Data.Repa.Flow.Generic.Map
         Data.Repa.Flow.Generic.Operator
+        Data.Repa.Flow.Generic.Process
         Data.Repa.Flow.Generic.Eval
         Data.Repa.Flow.Generic.Array.Distribute
         Data.Repa.Flow.Generic.Array.Shuffle
@@ -94,20 +100,19 @@ Library
 
   extensions:
         CPP
-        BangPatterns
-        NoMonomorphismRestriction
-        RankNTypes
         MagicHash
+        RankNTypes
+        TypeFamilies
+        BangPatterns
+        PatternGuards
+        ConstraintKinds
+        ParallelListComp
         FlexibleContexts
         FlexibleInstances
-        PatternGuards
-        TypeFamilies
-        MultiParamTypeClasses
-        ScopedTypeVariables
-        FunctionalDependencies
-        ConstraintKinds
-        ForeignFunctionInterface
         StandaloneDeriving
-        ParallelListComp
+        ScopedTypeVariables
+        MultiParamTypeClasses
+        FunctionalDependencies
+        ForeignFunctionInterface
+        NoMonomorphismRestriction
 
-        
