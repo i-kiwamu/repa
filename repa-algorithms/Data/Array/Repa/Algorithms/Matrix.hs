@@ -49,6 +49,7 @@ import Data.Array.Repa.Unsafe           as R
 import Control.Monad
 import Control.Monad.ST.Strict
 import Data.Vector.Unboxed.Base (Unbox)
+import Data.List                        as L
 
 
 -- Projections ----------------------------------------------------------------
@@ -307,3 +308,43 @@ mdiagD arr = slice md (Any :. (0::Int))
         g :: (DIM2 -> Double) -> DIM2 -> Double
         g get (Z :. r :. _) = get (Z :. r :. r)
 {-# NOINLINE mdiagD #-}
+
+
+-- Solve linear equations by LU decomposition ------------------------------------
+-- | Solve in parallel
+solveLUP :: Monad m
+         => Array U DIM2 Double
+         -> Array U DIM1 Double
+         -> m (Array U DIM1 Double)
+solveLUP arr vec = arr `deepSeqArray` vec `deepSeqArray`
+         do luarr <- luP arr
+            let larr = R.fromFunction (R.extent arr) (extractL luarr)
+                uarr = R.fromFunction (R.extent arr) (extractU luarr)
+                y = R.fromFunction e (\(Z :. i) -> fy larr i)
+            computeP
+             $ R.fromFunction e (\(Z :. i) -> fx uarr y (n-i))
+  where e = R.extent vec
+        n = size e - 1
+        extractL :: Array U DIM2 Double -> DIM2 -> Double
+        extractL mat (Z :. r :. c)
+            | r == c    = 1.0
+            | r > c     = mat R.! (Z :. r :. c)
+            | otherwise = 0.0
+        extractU :: Array U DIM2 Double -> DIM2 -> Double
+        extractU mat (Z :. r :. c)
+            | r <= c    = mat R.! (Z :. r :. c)
+            | otherwise = 0.0
+        fy :: Array D DIM2 Double -> Int -> Double
+        fy _ 0    = vec ! (Z :. 0 :: DIM1)
+        fy larr i = vec ! (Z :. i) - dotS ys ls
+          where ys = R.fromFunction (Z :. i) (\(Z :. k) -> fy larr k)
+                ls = slice (extract (Z :. i :. 0 :: DIM2)
+                                    (Z :. 1 :. i :: DIM2) larr)
+                           (Any :. (0::Int) :. All)
+        fx :: Array D DIM2 Double -> Array D DIM1 Double -> Int -> Double
+        fx uarr y 0 = y ! (Z :. n) / uarr ! (Z :. n :. n)
+        fx uarr y i = (y ! (Z :. n-i) - dotS xs us) / uarr ! (Z :. n-i :. n-i)
+          where xs = R.fromListUnboxed (Z :. i)
+                     $ L.map (fx uarr y) $ reverse [0..(i-1)]
+                us = slice (extract (Z :. n-i :. n-i+1) (Z :. 1 :. i) uarr)
+                           (Any :. (0::Int) :. All)
