@@ -1,5 +1,6 @@
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 {-# LANGUAGE PackageImports #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -- | Algorithms operating on matrices.
 -- 
@@ -15,31 +16,31 @@ module Data.Array.Repa.Algorithms.Matrix
         , col
 
           -- * Matrix Multiplication.
-        , mmultP,      mmultS
+        , mmultP,      mmultS,      mmult
 
           -- * inner product between Vector
         , dotP,        dotS
 
           -- * Matrix-Vector Multiplication.
-        , mvmultP,     mvmultS
+        , mvmultP,     mvmultS,     mvmult
 
           -- * outer product between Vector
-        , outerP,        outerS
+        , outerP,      outerS,      outer
 
           -- * Transposition.
-        , t2P, t2S
+        , transpose2P, transpose2S
 
           -- * Trace.
-        , trace2P, trace2S
+        , trace2P,     trace2S
 
           -- * Determinant.
-        , det2P, det2S
+        , det2P,       det2S
 
           -- * LU decomposition.
-        , luP, luS
+        , luP,         luS,         lu
 
           -- * diagonal elements of matrix.
-        , mdiagP, mdiagS)
+        , mdiagP,      mdiagS,      mdiag)
 
 
 where
@@ -67,14 +68,14 @@ col (Z :. _ :. c) = c
 
 -- MMult ----------------------------------------------------------------------
 -- | Matrix matrix multiply, in parallel.
-mmultP  :: Monad m
-        => Array U DIM2 Double 
-        -> Array U DIM2 Double 
-        -> m (Array U DIM2 Double)
+mmultP  :: (Num a, Elt a, Unbox a, Source r a, Monad m)
+        => Array r DIM2 a
+        -> Array r DIM2 a
+        -> m (Array U DIM2 a)
 
 mmultP arr brr 
  = [arr, brr] `deepSeqArrays` 
-   do   trr      <- t2P brr
+   do   trr      <- transpose2P brr
         let (Z :. h1  :. _)  = extent arr
         let (Z :. _   :. w2) = extent brr
         computeP 
@@ -87,13 +88,14 @@ mmultP arr brr
 
 
 -- | Matrix matrix multiply, sequentially.
-mmultS  :: Array U DIM2 Double 
-        -> Array U DIM2 Double 
-        -> Array U DIM2 Double
+mmultS  :: (Num a, Elt a, Unbox a, Source r a)
+        => Array r DIM2 a 
+        -> Array r DIM2 a
+        -> Array U DIM2 a
 
 mmultS arr brr
  = [arr, brr]  `deepSeqArrays` (runST $
-   do   trr     <- R.now $ t2S brr
+   do   trr     <- R.now $ transpose2S brr
         let (Z :. h1  :. _)  = extent arr
         let (Z :. _   :. w2) = extent brr
         return $ computeS 
@@ -105,7 +107,25 @@ mmultS arr brr
 {-# NOINLINE mmultS #-}
 
 
-dotP :: (Monad m, Source r1 a, Source r2 a, Num a, Elt a, Unbox a)
+-- | Matrix matrix multiply, delayed.
+mmult :: (Num a, Elt a, Unbox a, Source r1 a, Source r2 a)
+      => Array r1 DIM2 a
+      -> Array r2 DIM2 a
+      -> Array D  DIM2 a
+mmult arr brr = fromFunction (Z :. h1 :. w2)
+                $ \ix -> R.sumAllS
+                         $ R.zipWith (*)
+                           (unsafeSlice arr (Any :. (row ix) :. All))
+                           (unsafeSlice trr (Any :. (col ix) :. All))
+  where trr = R.transpose brr
+        (Z :. h1 :. _ ) = extent arr
+        (Z :. _  :. w2) = extent brr
+{-# NOINLINE mmult #-}
+
+
+-- inner product --------------------------------------------------------------
+-- | inner product in parallel
+dotP :: (Num a, Elt a, Unbox a, Monad m, Source r1 a, Source r2 a)
      => Array r1 DIM1 a
      -> Array r2 DIM1 a
      -> m a
@@ -113,96 +133,119 @@ dotP av bv = R.sumAllP $ R.zipWith (*) av bv
 {-# NOINLINE dotP #-}
 
 
-dotS :: (Source r1 a, Source r2 a, Num a, Elt a, Unbox a)
-     => Array r1 DIM1 a
-     -> Array r2 DIM1 a
-     -> a
+-- | inner product sequentially
+dotS :: (Num a1, Elt a1, Unbox a1, Source r1 a1,
+         Num a2, Elt a2, Unbox a2, Source r2 a2,
+         Num a3, Elt a3, Unbox a3)
+     => Array r1 DIM1 a1
+     -> Array r2 DIM1 a2
+     -> a3
 dotS av bv = R.sumAllS $ R.zipWith (*) av bv
 {-# NOINLINE dotS #-}
 
 
-mvmultP :: Monad m
-        => Array U DIM2 Double
-        -> Array U DIM1 Double
-        -> m (Array U DIM1 Double)
+-- Matrix vector multiply -----------------------------------------------------
+-- | matrix vector multiply in parallel
+mvmultP :: (Num a1, Num a2, Unbox a2, Source r1 a1, Source r2 a2, Monad m)
+        => Array r1 DIM2 a1
+        -> Array r2 DIM1 a2
+        -> m (Array U DIM1 a2)
 mvmultP arr vrr
- = arr `deepSeqArray` vrr `deepSeqArray` computeP $ R.map doti rs
- where nr = row $ extent arr
-       rs = fromListUnboxed (Z :. nr) [0..(nr-1)]
-       doti :: Int -> Double
-       doti r = dotS (slice arr (Any :. r :. All)) vrr
-       {-# NOINLINE doti #-}
+ = arr `deepSeqArray` vrr `deepSeqArray` computeP $ mvmult arr vrr
 {-# NOINLINE mvmultP #-}
 
 
-mvmultS :: Array U DIM2 Double
-        -> Array U DIM1 Double
-        -> Array U DIM1 Double
+-- | matrix vector multiply sequentially
+mvmultS :: (Num a1, Num a2, Unbox a2, Source r1 a1, Source r2 a2)
+        => Array r1 DIM2 a1
+        -> Array r2 DIM1 a2
+        -> Array U  DIM1 a2
 mvmultS arr vrr
  = arr `deepSeqArray` vrr `deepSeqArray` (runST $
-   return $ computeS $ R.map doti rs)
- where nr = row $ extent arr
-       rs = fromListUnboxed (Z :. nr) [0..(nr-1)] 
-       doti :: Int -> Double
-       doti r = dotS (slice arr (Any :. r :. All)) vrr
-       {-# NOINLINE doti #-}
+   return $ computeS $ mvmult arr vrr)
 {-# NOINLINE mvmultS #-}
 
 
-outerP :: Monad m
-       => Array U DIM1 Double
-       -> Array U DIM1 Double
-       -> m (Array U DIM2 Double)
-outerP va vb
- = [va, vb] `deepSeqArrays` computeP $ ma *^ mb
- where na = size $ extent va
-       nb = size $ extent vb
-       ma = extend (Z :. All :. nb) va
-       mb = extend (Z :. na :. All) vb
+-- | matrix vector multiply delayed
+mvmult :: (Num a1, Elt a1, Unbox a1, Source r1 a1, Source r2 a2)
+       => Array r1 DIM2 a1
+       -> Array r2 DIM1 a2
+       -> Array D  DIM1 a3
+mvmult arr vrr
+ = R.map doti rs
+ where nr = row $ extent arr
+       rs = fromListUnboxed (Z :. nr) [0..(nr-1)]
+       doti :: Int -> a2
+       doti r = dotS (slice arr (Any :. r :. All)) vrr
+       {-# NOINLINE doti #-}
+{-# NOINLINE mvmult #-}
+
+
+-- outer product --------------------------------------------------------------
+-- | outer product in parallel
+outerP :: (Num a, Unbox a, Source r1 a, Source r2 a, Monad m)
+       => Array r1 DIM1 a
+       -> Array r2 DIM1 a
+       -> m (Array U DIM2 a)
+outerP va vb = va `deepSeqArray` vb `deepSeqArray` computeP $ outer va vb
 {-# NOINLINE outerP #-}
 
 
-outerS :: Array U DIM1 Double
-       -> Array U DIM1 Double
-       -> Array U DIM2 Double
-outerS va vb
- = [va, vb] `deepSeqArrays` computeS $ ma *^ mb
+-- | outer product sequentially
+outerS :: (Num a, Unbox a, Source r1 a, Source r2 a)
+       => Array r1 DIM1 a
+       -> Array r2 DIM1 a
+       -> Array U DIM2 a
+outerS va vb = va `deepSeqArray` vb `deepSeqArray` computeS $ outer va vb
+{-# NOINLINE outerS #-}
+
+
+-- | outer product delayed
+outer :: (Num a, Source r1 a, Source r2 a)
+       => Array r1 DIM1 a
+       -> Array r2 DIM1 a
+       -> Array D DIM2 a
+outer va vb = ma *^ mb
  where na = size $ extent va
        nb = size $ extent vb
        ma = extend (Z :. All :. nb) va
        mb = extend (Z :. na :. All) vb
-{-# NOINLINE outerS #-}
+{-# NOINLINE outer #-}
 
 
 -- Transpose ------------------------------------------------------------------
 -- | Transpose a 2D matrix, in parallel.
-t2P :: Monad m 
-    => Array U DIM2 Double 
-    -> m (Array U DIM2 Double)
+transpose2P :: (Unbox a, Source r a, Monad m)
+    => Array r DIM2 a 
+    -> m (Array U DIM2 a)
 
-t2P arr
+transpose2P arr
  = arr `deepSeqArray` computeUnboxedP $
    unsafeBackpermute new_extent swap arr
  where  swap (Z :. i :. j)      = Z :. j :. i
         new_extent              = swap (extent arr)
-{-# NOINLINE t2P #-}
+{-# NOINLINE transpose2P #-}
 
 
 -- | Transpose a 2D matrix, sequentially.
-t2S :: Array U DIM2 Double 
-    -> Array U DIM2 Double
+transpose2S :: (Unbox a, Source r a)
+            => Array r DIM2 a 
+            -> Array U DIM2 a
 
-t2S arr
+transpose2S arr
  = arr `deepSeqArray` computeUnboxedS $
    unsafeBackpermute new_extent swap arr
  where  swap (Z :. i :. j)      = Z :. j :. i
         new_extent              = swap (extent arr)
-{-# NOINLINE t2S #-}
+{-# NOINLINE transpose2S #-}
 
 
--- Trace ------------------------------------------------------------------------
+
+-- Trace ----------------------------------------------------------------------
 -- | Get the trace of a (square) 2D matrix, in parallel.
-trace2P :: Monad m => Array U DIM2 Double -> m Double
+trace2P :: (Num a, Elt a, Unbox a, Source r a, Monad m)
+        => Array r DIM2 a
+        -> m a
 trace2P x 
  = liftM (safeHead . toList) $ sumP $ slice y (Z :. (0 :: Int) :. All)
  where
@@ -215,7 +258,9 @@ trace2P x
 
 
 -- | Get the trace of a (square) 2D matrix, sequentially.
-trace2S :: Array U DIM2 Double -> Double
+trace2S :: (Num a, Elt a, Unbox a, Source r a)
+        => Array r DIM2 a
+        -> a
 trace2S x 
  = safeHead $ toList $ sumS $ slice y (Z :. (0 :: Int) :. All)
  where
@@ -227,9 +272,11 @@ trace2S x
 {-# NOINLINE trace2S #-}
 
 
--- Determinant -------------------------------------------------------------------
+-- Determinant ----------------------------------------------------------------
 -- | Get the determinant of a (square) 2D matrix, in parallel.
-det2P :: Monad m => Array U DIM2 Double -> m Double
+det2P :: (Num a, Elt a, Fractional a, Unbox a, Source r a, Monad m)
+      => Array r DIM2 a
+      -> m a
 det2P arr = arr `deepSeqArray` do
       luarr <- luP arr
       ds <- mdiagP luarr
@@ -239,7 +286,9 @@ det2P arr = arr `deepSeqArray` do
 
 
 -- | Get the determinant of a (square) 2D matrix sequentially
-det2S :: Array U DIM2 Double -> Double
+det2S :: (Num a, Elt a, Fractional a, Unbox a, Source r a)
+      => Array r DIM2 a
+      -> a
 det2S arr = arr `deepSeqArray` (runST $
       do luarr <- R.now $ luS arr
          ds <- R.now $ mdiagS luarr
@@ -248,25 +297,28 @@ det2S arr = arr `deepSeqArray` (runST $
 {-# NOINLINE det2S #-}
 
 
--- LU decomposition --------------------------------------------------------------
+-- LU decomposition -----------------------------------------------------------
 -- | LU decomposition by Crout algorithms (L(i,i) = 1) in parallel
-luP :: Monad m
-    => Array U DIM2 Double 
-    -> m (Array U DIM2 Double)
-luP arr = arr `deepSeqArray` computeP $ luD arr
+luP :: (Num a, Fractional a, Unbox a, Source r a, Monad m)
+    => Array r DIM2 a
+    -> m (Array U DIM2 a)
+luP arr = arr `deepSeqArray` computeP $ lu arr
 {-# NOINLINE luP #-}
 
 
 -- | LU decomposition by Crout algorithms (L(i,i) = 1) sequentially
-luS :: Array U DIM2 Double
-    -> Array U DIM2 Double
-luS arr = arr `deepSeqArray` computeS $ luD arr
+luS :: (Num a, Fractional a, Unbox a, Source r a)
+    => Array r DIM2 a
+    -> Array U DIM2 a
+luS arr = arr `deepSeqArray` computeS $ lu arr
 {-# NOINLINE luS #-}
 
 
-luD :: Array U DIM2 Double
-    -> Array D DIM2 Double
-luD arr = arr'
+-- | LU decomposition by Crout algorithms (L(i,i) = 1) delayed
+lu :: (Num a, Fractional a, Source r a)
+   => Array r DIM2 a
+   -> Array D DIM2 a
+lu arr = arr'
   where arr' = R.fromFunction e (\(Z :. i :. j) -> f i j)
         e = R.extent arr
         f i j = if i > j
@@ -279,43 +331,55 @@ luD arr = arr'
             a'i_ k = arr' R.! (Z :. i :. k)
             a'_j k = arr' R.! (Z :. k :. j)
             a'jj   = arr' R.! (Z :. j :. j)
-{-# NOINLINE luD #-}
+{-# NOINLINE lu #-}
 
 
--- Diagonal ---------------------------------------------------------------------
+-- Swap row -----------------------------------------------------------
+-- | Swap row delayed
+swapRow2D :: (Source r Double)
+          => Int
+          -> Int
+          -> Array r DIM2 Double
+          -> Array D DIM2 Double
+swapRow2D i j arr = undefined
+
+
+-- Diagonal -------------------------------------------------------------------
 -- | Diagonal elements in parallel
-mdiagP :: Monad m
-       => Array U DIM2 Double
-       -> m (Array U DIM1 Double)
-mdiagP arr = arr `deepSeqArray` computeP $ mdiagD arr
+mdiagP :: (Unbox a, Source r a, Monad m)
+       => Array r DIM2 a
+       -> m (Array U DIM1 a)
+mdiagP arr = arr `deepSeqArray` computeP $ mdiag arr
 {-# NOINLINE mdiagP #-}
 
 
 -- | Diagonal elements sequentially
-mdiagS :: Array U DIM2 Double
-       -> Array U DIM1 Double
-mdiagS arr = arr `deepSeqArray` computeS $ mdiagD arr
+mdiagS :: (Unbox a, Source r a)
+       => Array r DIM2 a
+       -> Array U DIM1 a
+mdiagS arr = arr `deepSeqArray` computeS $ mdiag arr
 {-# NOINLINE mdiagS #-}
 
 
--- | Diagonal elements kernel
-mdiagD :: Array U DIM2 Double
-       -> Array D DIM1 Double
-mdiagD arr = slice md (Any :. (0::Int))
+-- | Diagonal elements delayed
+mdiag :: (Source r a)
+      => Array r DIM2 a
+      -> Array D DIM1 a
+mdiag arr = slice md (Any :. (0::Int))
   where md = R.traverse arr f g
         f :: DIM2 -> DIM2
         f (Z :. r :. c) = Z :. (min r c) :. (1::Int)
-        g :: (DIM2 -> Double) -> DIM2 -> Double
+        g :: (DIM2 -> a) -> DIM2 -> a
         g get (Z :. r :. _) = get (Z :. r :. r)
-{-# NOINLINE mdiagD #-}
+{-# NOINLINE mdiag #-}
 
 
 -- Solve linear equations by LU decomposition ------------------------------------
 -- | Solve in parallel
-solveLUP :: Monad m
-         => Array U DIM2 Double
-         -> Array U DIM1 Double
-         -> m (Array U DIM1 Double)
+solveLUP :: (Num a1, Num a2, Source r1 a1, Source r2 a2, Monad m)
+         => Array r1 DIM2 a1
+         -> Array r2 DIM1 a2
+         -> m (Array U DIM1 a2)
 solveLUP arr vec = arr `deepSeqArray` vec `deepSeqArray`
          do luarr <- luP arr
             let larr = R.fromFunction (R.extent arr) (extractL luarr)
@@ -325,23 +389,26 @@ solveLUP arr vec = arr `deepSeqArray` vec `deepSeqArray`
              $ R.fromFunction e (\(Z :. i) -> fx uarr y (n-i))
   where e = R.extent vec
         n = size e - 1
-        extractL :: Array U DIM2 Double -> DIM2 -> Double
+        extractL :: (Num a, Fractional a, Unbox a)
+                 => Array U DIM2 a -> DIM2 -> a
         extractL mat (Z :. r :. c)
             | r == c    = 1.0
             | r > c     = mat R.! (Z :. r :. c)
             | otherwise = 0.0
-        extractU :: Array U DIM2 Double -> DIM2 -> Double
+        extractU :: (Num a, Fractional a, Unbox a)
+                 => Array U DIM2 a -> DIM2 -> a
         extractU mat (Z :. r :. c)
             | r <= c    = mat R.! (Z :. r :. c)
             | otherwise = 0.0
-        fy :: Array D DIM2 Double -> Int -> Double
+        fy :: (Num a) => Array D DIM2 a -> Int -> a
         fy _ 0    = vec ! (Z :. 0 :: DIM1)
         fy larr i = vec ! (Z :. i) - dotS ys ls
           where ys = R.fromFunction (Z :. i) (\(Z :. k) -> fy larr k)
                 ls = slice (extract (Z :. i :. 0 :: DIM2)
                                     (Z :. 1 :. i :: DIM2) larr)
                            (Any :. (0::Int) :. All)
-        fx :: Array D DIM2 Double -> Array D DIM1 Double -> Int -> Double
+        fx :: (Num a, Fractional a, Elt a, Unbox a)
+           => Array D DIM2 a -> Array D DIM1 a -> Int -> a
         fx uarr y 0 = y ! (Z :. n) / uarr ! (Z :. n :. n)
         fx uarr y i = (y ! (Z :. n-i) - dotS xs us) / uarr ! (Z :. n-i :. n-i)
           where xs = R.fromListUnboxed (Z :. i)
