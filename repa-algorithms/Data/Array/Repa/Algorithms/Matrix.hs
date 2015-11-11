@@ -55,6 +55,7 @@ module Data.Array.Repa.Algorithms.Matrix
 
 where
 import Data.Array.Repa                  as R
+import Data.Array.Repa.Eval             as R
 import Data.Array.Repa.Unsafe           as R
 import Control.Monad
 import Control.Monad.ST.Strict
@@ -85,7 +86,16 @@ mmultP  :: (Monad m, Source r1 Double, Source r2 Double)
         -> m (Array U DIM2 Double)
 
 mmultP arr brr 
- = arr `deepSeqArray` brr `deepSeqArray` (computeP $ mmult arr brr)
+ = arr `deepSeqArray` brr `deepSeqArray`
+   do   trr     <- transpose2P brr
+        let (Z :. h1  :. _)  = extent arr
+        let (Z :. _   :. w2) = extent brr
+        computeP
+         $ fromFunction (Z :. h1 :. w2)
+         $ \ix   -> R.sumAllS 
+                  $ R.zipWith (*)
+                        (unsafeSlice arr (Any :. (row ix) :. All))
+                        (unsafeSlice trr (Any :. (col ix) :. All))
 {-# NOINLINE mmultP #-}
 
 
@@ -94,9 +104,17 @@ mmultS  :: (Source r1 Double, Source r2 Double)
         => Array r1 DIM2 Double
         -> Array r2 DIM2 Double
         -> Array U  DIM2 Double
-
 mmultS arr brr
- = arr `deepSeqArray` brr `deepSeqArray` (computeS $ mmult arr brr)
+ = arr `deepSeqArray` brr `deepSeqArray` (runST $
+   do   trr     <- R.now $ transpose2S brr
+        let (Z :. h1  :. _)  = extent arr
+        let (Z :. _   :. w2) = extent brr
+        return $ computeS 
+         $ fromFunction (Z :. h1 :. w2)
+         $ \ix   -> R.sumAllS 
+                  $ R.zipWith (*)
+                        (unsafeSlice arr (Any :. (row ix) :. All))
+                        (unsafeSlice trr (Any :. (col ix) :. All)))
 {-# NOINLINE mmultS #-}
 
 
@@ -151,24 +169,21 @@ mvmultP arr vrr = arr `deepSeqArray` vrr
 mvmultS :: (Source r1 Double, Source r2 Double)
        => Array r1 DIM2 Double
        -> Array r2 DIM1 Double
-       -> Array U DIM1 Double
+       -> Array U  DIM1 Double
 mvmultS arr vrr = arr `deepSeqArray` vrr
                   `deepSeqArray` computeS $ mvmult arr vrr
 {-# NOINLINE mvmultS #-}
 
 
 -- | Matrix vector multiply, delayed.
-mvmult :: forall r1 r2 .
-          (Source r1 Double, Source r2 Double)
+mvmult :: (Source r1 Double, Source r2 Double)
        => Array r1 DIM2 Double
        -> Array r2 DIM1 Double
-       -> Array D DIM1 Double
-mvmult arr vrr = R.map doti rs
- where nr = row $ extent arr
-       rs = fromListUnboxed (Z :. nr) [0..(nr-1)] 
-       doti :: Int -> Double
-       doti r = dotS (slice arr (Any :. r :. All)) vrr
-       {-# NOINLINE doti #-}
+       -> Array D  DIM1 Double
+mvmult arr vec = R.fromFunction e
+                 $ \(Z :. r) -> dotS (unsafeSlice arr (Any :. r :. All))
+                                     vec
+  where (e :. _) = R.extent arr
 {-# NOINLINE mvmult #-}
 
 
