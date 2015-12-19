@@ -21,7 +21,7 @@ module Data.Array.Repa.Algorithms.Matrix
         , mmultP,      mmultS,      mmult
 
           -- * inner product between Vector
-        , dotP,        dotS
+        , dotP,        dotS,        dot
 
           -- * Matrix-Vector Multiplication.
         , mvmultP,     mvmultS,     mvmult
@@ -173,13 +173,41 @@ dotS av bv = [av, bv] `deepSeqArrays`
 {-# NOINLINE dotS #-}
 
 
+-- | inner product, delayed.
+dot :: (Source r1 Double, Source r2 Double)
+    => Array r1 DIM1 Double
+    -> Array r2 DIM1 Double
+    -> Double
+dot av bv = R.sumAllS $ R.zipWith (*) av bv
+{-# NOINLINE dot #-}
+
+
 -- Matrix vector mutiply ------------------------------------------------------
 -- | Matrix vector multiply, in parallel.
+mvmultP :: (Monad m)
+       => Array U DIM2 Double
+       -> Array U DIM1 Double
        -> m (Array U DIM1 Double)
+mvmultP arr vec = arr `deepSeqArray` vec `deepSeqArray`
+        R.computeP $ mvmult arr vec
 {-# NOINLINE mvmultP #-}
 
 
 -- | Matrix vector multiply, sequentially.
+mvmultS :: Array U DIM2 Double
+        -> Array U DIM1 Double
+        -> Array U DIM1 Double
+mvmultS arr vec = arr `deepSeqArray` vec `deepSeqArray`
+                  R.fromUnboxed (Z :. h1) $ V.map (fun arr vb) vh
+  where h1 = row $ R.extent arr
+        vh = V.enumFromN 0 h1
+        vb = R.toUnboxed vec
+        fun :: Array U DIM2 Double
+            -> V.Vector Double
+            -> Int
+            -> Double
+        fun ma vb h = let va = slicedUnbox arr h
+                      in V.sum $ V.zipWith (*) va vb
 {-# NOINLINE mvmultS #-}
 
 
@@ -189,18 +217,29 @@ mvmult :: (Source r1 Double, Source r2 Double)
        -> Array r2 DIM1 Double
        -> Array D  DIM1 Double
 mvmult arr vec = R.fromFunction e
+                 $ \(Z :. r) ->
+                       R.sumAllS 
+                       $ R.zipWith (*) (unsafeSlice arr (Any :. r :. All))
+                                       vec
   where (e :. _) = R.extent arr
 {-# NOINLINE mvmult #-}
 
 
 -- Outer product --------------------------------------------------------------
 -- | outer product, in parallel.
+outerP :: (Monad m)
+       => Array U DIM1 Double
+       -> Array U DIM1 Double
        -> m (Array U DIM2 Double)
+outerP va vb = [va, vb] `deepSeqArrays` computeP $ outer va vb
 {-# NOINLINE outerP #-}
 
 
 -- | outer product, sequentially.
+outerS :: Array U DIM1 Double
+       -> Array U DIM1 Double
        -> Array U DIM2 Double
+outerS va vb = [va, vb] `deepSeqArrays` computeS $ outer va vb
 {-# NOINLINE outerS #-}
 
 
@@ -209,19 +248,33 @@ outer :: (Source r1 Double, Source r2 Double)
       => Array r1 DIM1 Double
       -> Array r2 DIM1 Double
       -> Array D DIM2 Double
+outer va vb = ma *^ mb
+  where na = size $ extent va
+        nb = size $ extent vb
+        ma = extend (Z :. All :. nb) va
+        mb = extend (Z :. na :. All) vb
 {-# NOINLINE outer #-}
 
 
 
 -- Transpose ------------------------------------------------------------------
 -- | Transpose a 2D matrix, in parallel.
+transpose2P :: (Monad m)
+            => Array U DIM2 Double
+            -> m (Array U DIM2 Double)
 transpose2P arr
  = arr `deepSeqArray` computeUnboxedP $ transpose2 arr
 {-# NOINLINE transpose2P #-}
 
 
 -- | Transpose a 2D matrix, sequentially.
+transpose2S :: Array U DIM2 Double
+            -> Array U DIM2 Double
 transpose2S arr
+ = arr `deepSeqArray` computeUnboxedS
+   $ unsafeBackpermute new_extent swap arr
+ where  swap (Z :. i :. j)      = Z :. j :. i
+        new_extent              = swap (extent arr)
 {-# NOINLINE transpose2S #-}
 
 
@@ -251,6 +304,8 @@ vappend arr1 arr2 = transpose2 $ R.append ta1 ta2
 
 -- Trace ----------------------------------------------------------------------
 -- | Get the trace of a (square) 2D matrix, in parallel.
+trace2P :: (Monad m)
+        => Array U DIM2 Double
         -> m Double
 trace2P x 
  = liftM (safeHead . toList) $ sumP $ slice y (Z :. (0 :: Int) :. All)
@@ -264,6 +319,7 @@ trace2P x
 
 
 -- | Get the trace of a (square) 2D matrix, sequentially.
+trace2S :: Array U DIM2 Double
         -> Double
 trace2S x 
  = safeHead $ toList $ sumS $ slice y (Z :. (0 :: Int) :. All)
@@ -276,8 +332,25 @@ trace2S x
 {-# NOINLINE trace2S #-}
 
 
+-- | Get the trace of a (square) 2D matrix, sequentially.
+trace2 :: (Source r Double)
+       => Array r DIM2 Double
+       -> Double
+trace2 x 
+ = safeHead $ toList $ sumS $ slice y (Z :. (0 :: Int) :. All)
+ where
+    safeHead []     = error "repa-algorithms: trace2S empty list"
+    safeHead (x':_) = x'
+    y               =  unsafeBackpermute (extent x) f x
+    f (Z :. i :. j) = Z :. (i - j) `mod` nRows:. j
+    Z :. nRows :. _nCols = extent x
+{-# NOINLINE trace2 #-}
+
+
 -- Determinant ----------------------------------------------------------------
 -- | Get the determinant of a (square) 2D matrix, in parallel.
+det2P :: (Monad m)
+      => Array U DIM2 Double
       -> m Double
 det2P arr = arr `deepSeqArray` do
       let luarr = fst $ lu arr
@@ -288,6 +361,7 @@ det2P arr = arr `deepSeqArray` do
 
 
 -- | Get the determinant of a (square) 2D matrix sequentially
+det2S :: Array U DIM2 Double
       -> Double
 det2S arr = arr `deepSeqArray` (runST $
       do let luarr = fst $ lu arr
@@ -299,6 +373,8 @@ det2S arr = arr `deepSeqArray` (runST $
 
 -- LU factorization by Crout algorithms (L(i,i) = 1) --------------------------
 -- | LU factorization, in parallel
+luP :: (Monad m)
+    => Array U DIM2 Double
     -> m ((Array U DIM2 Double,
            Array U DIM1 (Int, Int)))
 luP arr = arr `deepSeqArray` do
@@ -308,6 +384,7 @@ luP arr = arr `deepSeqArray` do
 
 
 -- | LU factorization, sequentially
+luS :: Array U DIM2 Double
     -> (Array U DIM2 Double,
         Array U DIM1 (Int, Int))
 luS arr = arr `deepSeqArray` (computeS mat, computeS p)
@@ -348,6 +425,7 @@ lu arr = iter (nr-1) ma0 md0 mu0 ml0 [(0,p0)]
                 mu' = R.extract (Z :. 0 :. 1) (Z :. k :. nr-k-1) mu
                 l_k = R.fromFunction (Z :. nr-k)
                       $ \(Z :. i) -> ma R.! (Z :. k+i :. k)
+                                     - dot mu_k (R.slice ml (Any :. i :. All))
                 (pivot, pj) = V.maximumBy (comparing (abs . fst))
                               $ V.zip (R.toUnboxed $ R.computeS l_k)
                                       (V.fromList [0..(nr-k-1)])
@@ -362,6 +440,7 @@ lu arr = iter (nr-1) ma0 md0 mu0 ml0 [(0,p0)]
                 ml'' = ml' R.++ l_k'
                 uk_ = R.fromFunction (Z :. nr-k-1)
                       $ \(Z :. j) -> ma' R.! (Z :. k :. k+j+1)
+                                     - dot mlk_ (R.slice mu' (Any :. j))
                 mu'' = mu' -+- (R.reshape (Z :. 1 :. nr-k-1 :: DIM2) uk_)
                 md' = (md R.++ (R.reshape (Z :. k :. 1 :: DIM2) mu_k))
                       -+- (R.reshape (Z :. 1 :. k+1 :: DIM2)
@@ -389,12 +468,15 @@ swapRow (r1, r2) mat
 
 -- Diagonal vector ------------------------------------------------------------
 -- | Diagonal elements, in parallel
+mdiagP :: (Monad m)
+       => Array U DIM2 Double
        -> m (Array U DIM1 Double)
 mdiagP arr = arr `deepSeqArray` computeP $ mdiag arr
 {-# NOINLINE mdiagP #-}
 
 
 -- | Diagonal elements, sequentially
+mdiagS :: Array U DIM2 Double
        -> Array U DIM1 Double
 mdiagS arr = arr `deepSeqArray` computeS $ mdiag arr
 {-# NOINLINE mdiagS #-}
@@ -415,12 +497,15 @@ mdiag arr = slice md (Any :. (0::Int))
 
 -- Diagonal matrix ------------------------------------------------------------
 -- | Diagonal matrix, in parallel
+vdiagP :: (Monad m)
+       => Array U DIM1 Double
        -> m(Array U DIM2 Double)
 vdiagP vec = vec `deepSeqArray` computeP $ vdiag vec
 {-# NOINLINE vdiagP #-}
 
 
 -- | Diagonal matrix, sequentially
+vdiagS :: Array U DIM1 Double
        -> Array U DIM2 Double
 vdiagS vec = vec `deepSeqArray` computeS $ vdiag vec
 {-# NOINLINE vdiagS #-}
@@ -440,6 +525,9 @@ vdiag vec = R.fromFunction (Z :. n :. n)
 
 -- Solve linear equations by LU factorization ---------------------------------
 -- | Solve linear equation, in parallel
+solveLUP :: (Monad m)
+         => Array U DIM2 Double
+         -> Array U DIM1 Double
          -> m (Array U DIM1 Double)
 solveLUP arr vec = arr `deepSeqArray` vec `deepSeqArray`
                    computeP $ solveLU arr vec
@@ -447,6 +535,8 @@ solveLUP arr vec = arr `deepSeqArray` vec `deepSeqArray`
 
 
 -- | Solve linear equation, sequentially
+solveLUS :: Array U DIM2 Double
+         -> Array U DIM1 Double
          -> Array U DIM1 Double
 solveLUS arr vec = arr `deepSeqArray` vec `deepSeqArray`
                    computeS $ solveLU arr vec
@@ -478,6 +568,7 @@ solveLU arr vec = xvec
            -> Int
            -> Double
         fy _ 0    = vec' ! (Z :. 0)
+        fy la i = vec' ! (Z :. i) - dot ys ls
           where ys = R.fromFunction (Z :. i) (\(Z :. k) -> fy la k)
                 ls = R.slice (R.extract (Z :. i :. 0) (Z :. 1 :. i) la)
                              (Any :. (0::Int) :. All)
@@ -486,6 +577,7 @@ solveLU arr vec = xvec
            -> Int
            -> Double
         fx ua y 0 = y ! (Z :. n) / ua ! (Z :. n :. n)
+        fx ua y i = (y ! (Z :. n-i) - dot xs us)
                          / ua ! (Z :. n-i :. n-i)
           where xs = R.fromListUnboxed (Z :. i)
                      $ L.map (fx ua y) $ reverse [0..(i-1)]
