@@ -1,8 +1,6 @@
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE BangPatterns #-}
 
 -- | Algorithms operating on matrices.
 -- 
@@ -138,18 +136,20 @@ mmult :: (Source r1 Double, Source r2 Double)
       => Array r1 DIM2 Double
       -> Array r2 DIM2 Double
       -> Array D  DIM2 Double
-mmult arr brr = runST (do
-    trr <- R.now $ R.computeS $ R.transpose brr
-    return $ R.fromFunction (Z :. h1 :. w2) (fun arr trr))
+mmult arr brr =
+    let trr = R.transpose brr
+    in trr `R.deepSeqArray` R.fromFunction (Z :. h1 :. w2) (fun arr trr)
   where (Z :. h1 :. _ ) = R.extent arr
         (Z :. _  :. w2) = R.extent brr
-        fun :: Array U DIM2 Double
-            -> Array U DIM2 Double
+        fun :: (Source r1 Double, Source r2 Double)
+            => Array r1 DIM2 Double
+            -> Array r2 DIM2 Double
             -> DIM2
             -> Double
         fun ma mb (Z :. r :. c) =
-            let va = slicedUnbox ma r
-            in V.sum $ V.zipWith (*) va $ slicedUnbox mb c
+            let va = unsafeSlice ma (Z :. r :. All)
+                vb = unsafeSlice mb (Z :. c :. All)
+            in dot va vb
 {-# NOINLINE mmult #-}
 
 
@@ -206,8 +206,8 @@ mvmultS arr vec = arr `deepSeqArray` vec `deepSeqArray`
             -> V.Vector Double
             -> Int
             -> Double
-        fun ma vb h = let va = slicedUnbox arr h
-                      in V.sum $ V.zipWith (*) va vb
+        fun m v h = let va = slicedUnbox m h
+                    in V.sum $ V.zipWith (*) va v
 {-# NOINLINE mvmultS #-}
 
 
@@ -363,8 +363,8 @@ det2P arr = arr `deepSeqArray` do
 -- | Get the determinant of a (square) 2D matrix sequentially
 det2S :: Array U DIM2 Double
       -> Double
-det2S arr = arr `deepSeqArray` (runST $
-      do let luarr = fst $ lu arr
+det2S arr = arr `deepSeqArray` runST (do 
+         let luarr = fst $ lu arr
              ds = mdiag luarr
              x = R.foldS (*) 1 ds
          return $ x ! Z)
@@ -375,11 +375,11 @@ det2S arr = arr `deepSeqArray` (runST $
 -- | LU factorization, in parallel
 luP :: (Monad m)
     => Array U DIM2 Double
-    -> m ((Array U DIM2 Double,
-           Array U DIM1 (Int, Int)))
+    -> m (Array U DIM2 Double,
+          Array U DIM1 (Int, Int))
 luP arr = arr `deepSeqArray` do
     let (mat, p) = luS arr
-    return $ (mat, p)
+    return (mat, p)
 {-# NOINLINE luP #-}
 
 
